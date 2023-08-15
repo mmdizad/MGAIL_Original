@@ -5,7 +5,9 @@ import itertools
 import click
 import gym
 import sys
-sys.path.append('/home/headless/MA-AIRL/multi-agent-particle-envs/')
+relative_path = sys.path[0]
+relative_path = relative_path.replace('multi-agent-irl', 'multi-agent-particle-envs')
+sys.path.append(relative_path)
 import make_env
 from rl import bench
 from rl import logger
