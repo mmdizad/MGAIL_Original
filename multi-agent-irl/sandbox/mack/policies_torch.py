@@ -47,17 +47,24 @@ class CategoricalPolicy(nn.Module):
         return pi, vf
 
     def step_log_prob(self, ob, acts):
-        pi, _ = self.forward(self.X, self.X_v, self.A_v)
-        log_prob = F.log_softmax(pi, dim=1)
-        selected_log_prob = log_prob.gather(1, acts.unsqueeze(1))
-        return selected_log_prob
+        h1 = F.relu(self.fc1(ob))
+        h2 = F.relu(self.fc2(h1))
+        pi = self.pi_f(h2)
+        loss = nn.CrossEntropyLoss()(pi, acts)
+        return loss
 
     def step(self, ob, obs, a_v):
         pi, vf = self.forward(ob, obs, a_v)
         a = torch.multinomial(F.softmax(pi, dim=1), 1).squeeze(1)
-        return a, vf, []
+        return a, vf
 
     def value(self, ob, a_v):
-        _, vf = self.forward(ob, None, a_v)
+        if a_v is not None:
+            Y = torch.cat([ob, a_v], dim=1)
+        else:
+            Y = ob
+        h3 = F.relu(self.fc3(Y))
+        h4 = F.relu(self.fc4(h3))
+        vf = self.vf_f(h4)
         return vf.squeeze(1)
 

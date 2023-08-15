@@ -31,6 +31,7 @@ class CategoricalPolicy(object):
             vf = fc(h4, 'v', 1, act=lambda x: x)
 
         self.log_prob = -tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pi, labels=actions)
+        print(f'vf shape is {vf.shape}')
         v0 = vf[:, 0]
         a0 = sample(pi)
         self.initial_state = []  # not stateful
