@@ -45,13 +45,13 @@ class CategoricalPolicy(nn.Module):
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
         pi = self.pi_f(h2)
-        loss = nn.CrossEntropyLoss()(pi, acts)
+        loss = -1 * nn.CrossEntropyLoss()(pi, acts)
         return loss
 
     def step(self, ob, obs, a_v):
-        pi, vf = self.forward(ob, obs, a_v)
+        pi, v = self.forward(ob, obs, a_v)
         a = sample(pi)
-        return a, vf
+        return a, v
 
     def value(self, ob, a_v):
         if a_v is not None:
