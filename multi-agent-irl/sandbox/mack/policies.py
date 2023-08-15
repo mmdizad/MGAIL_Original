@@ -1,7 +1,6 @@
 import numpy as np
-import torch
 
-# import rl.common.tf_util as U
+import rl.common.tf_util as U
 from rl.acktr.utils import fc, sample
 
 
@@ -12,15 +11,11 @@ class CategoricalPolicy(object):
         ob_shape = (nbatch, ob_space.shape[0] * nstack)
         all_ob_shape = (nbatch, sum([obs.shape[0] for obs in ob_spaces]) * nstack)
         nact = ac_space.n
-        actions = torch.empty(nbatch, dtype=torch.int32)
+        actions = tf.placeholder(tf.int32, (nbatch))
         all_ac_shape = (nbatch, (sum([ac.n for ac in ac_spaces]) - nact) * nstack)
-        X = torch.empty(ob_shape, dtype=torch.int32) #obs
-        X_v = torch.empty(all_ob_shape, dtype=torch.int32)
-        A_v = torch.empty(all_ac_shape, dtype=torch.int32)
-        
-        
-        
-        
+        X = tf.placeholder(tf.float32, ob_shape)  # obs
+        X_v = tf.placeholder(tf.float32, all_ob_shape)
+        A_v = tf.placeholder(tf.float32, all_ac_shape)
         with tf.variable_scope('policy_{}'.format(name), reuse=reuse):
             h1 = fc(X, 'fc1', nh=128, init_scale=np.sqrt(2))
             h2 = fc(h1, 'fc2', nh=128, init_scale=np.sqrt(2))
