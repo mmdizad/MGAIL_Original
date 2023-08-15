@@ -2,12 +2,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-
-def fc(ns, nh, init_scale=1.0):
-    linear = nn.Linear(ns, nh)
-    nn.init.orthogonal_(linear.weight, gain=init_scale)
-    nn.init.constant_(linear.bias, 0.0)
-    return linear
+from rl.acktr.utils_torch import fc, sample
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces,
@@ -55,7 +50,7 @@ class CategoricalPolicy(nn.Module):
 
     def step(self, ob, obs, a_v):
         pi, vf = self.forward(ob, obs, a_v)
-        a = torch.multinomial(F.softmax(pi, dim=1), 1).squeeze(1)
+        a = sample(pi)
         return a, vf
 
     def value(self, ob, a_v):
