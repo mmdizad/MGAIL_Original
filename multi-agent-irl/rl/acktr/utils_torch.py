@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 def sample(logits, axis=1):
-    noise = torch.rand_like(logits)
+    noise = torch.rand(logits)
     return torch.argmax(logits - torch.log(-torch.log(noise)), dim=axis)
 
 def fc(ns, nh, init_scale=1.0):
