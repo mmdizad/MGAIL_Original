@@ -1,5 +1,9 @@
 import gym
 import click
+import sys
+relative_path = sys.path[0]
+relative_path = relative_path.replace('multi-agent-irl', 'multi-agent-particle-envs')
+sys.path.append(relative_path)
 import multiagent
 import time
 import tensorflow as tf
@@ -14,7 +18,9 @@ import pickle as pkl
 
 
 @click.command()
-@click.option('--env', type=click.STRING)
+@click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
+                                          'simple_crypto', 'simple_push',
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
     tf.reset_default_graph()
