@@ -147,7 +147,7 @@ schedules = {
     'double_middle_drop':double_middle_drop
 }
 
-class Scheduler(object):
+class Scheduler():
     def __init__(self, v, nvalues, schedule):
         self.n = 0.
         self.v = v

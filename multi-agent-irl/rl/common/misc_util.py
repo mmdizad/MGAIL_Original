@@ -69,11 +69,11 @@ class EzPickle(object):
 
 def set_global_seeds(i):
     try:
-        import torch
+        import tensorflow as tf
     except ImportError:
         pass
     else:
-        torch.manual_seed(i)
+        tf.set_random_seed(i)
     np.random.seed(i)
     random.seed(i)
 
