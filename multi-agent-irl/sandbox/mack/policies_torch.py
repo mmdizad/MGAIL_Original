@@ -27,10 +27,18 @@ class CategoricalPolicy(nn.Module):
         self.vf_f = fc(256, 1)
 
     def forward(self, ob, obs, a_v):
+        pi = self.compute_pi(ob)
+        vf = self.compute_vf(obs, a_v)
+        return pi, vf
+
+    def compute_pi(self, ob):
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
         pi = self.pi_f(h2)
 
+        return pi
+    
+    def compute_vf(self, obs, a_v):
         if a_v is not None:
             Y = torch.cat([obs, a_v], dim=1)
         else:
@@ -38,13 +46,11 @@ class CategoricalPolicy(nn.Module):
         h3 = F.relu(self.fc3(Y))
         h4 = F.relu(self.fc4(h3))
         vf = self.vf_f(h4)
+        return vf
 
-        return pi, vf
 
     def step_log_prob(self, ob, acts):
-        h1 = F.relu(self.fc1(ob))
-        h2 = F.relu(self.fc2(h1))
-        pi = self.pi_f(h2)
+        pi = self.compute_pi(ob)
         loss = -1 * nn.CrossEntropyLoss()(pi, acts)
         return loss
 
@@ -54,12 +60,6 @@ class CategoricalPolicy(nn.Module):
         return a, v
 
     def value(self, ob, a_v):
-        if a_v is not None:
-            Y = torch.cat([ob, a_v], dim=1)
-        else:
-            Y = ob
-        h3 = F.relu(self.fc3(Y))
-        h4 = F.relu(self.fc4(h3))
-        vf = self.vf_f(h4)
-        return vf.squeeze(1)
+        vf = self.compute_vf(ob, a_v)
+        return vf[:, 0]
 
