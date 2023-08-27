@@ -6,8 +6,13 @@ from rl.acktr.utils_torch import fc, sample
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces,
-                 nenv, nsteps, nstack):
+                 nenv, nsteps, nstack, device):
+        print(ob_space)
+        print(ac_space)
+        print(ob_spaces)
+        print(ac_spaces)
         super(CategoricalPolicy, self).__init__()
+        self.device = device
         ob_shape = ob_space.shape[0] * nstack
         all_ob_shape = sum([obs.shape[0] for obs in ob_spaces]) * nstack
         nact = ac_space.n
@@ -32,6 +37,7 @@ class CategoricalPolicy(nn.Module):
         return pi, vf
 
     def compute_pi(self, ob):
+        ob = torch.tensor(ob).to(self.device)
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
         pi = self.pi_f(h2)
@@ -39,7 +45,9 @@ class CategoricalPolicy(nn.Module):
         return pi
     
     def compute_vf(self, obs, a_v):
+        obs = torch.tensor(obs).to(self.device)
         if a_v is not None:
+            a_v = torch.tensor(a_v).to(self.device)
             Y = torch.cat([obs, a_v], dim=1)
         else:
             Y = obs
@@ -57,9 +65,8 @@ class CategoricalPolicy(nn.Module):
     def step(self, ob, obs, a_v):
         pi, v = self.forward(ob, obs, a_v)
         a = sample(pi)
-        return a, v
+        return a, v, [] # dummy state
 
     def value(self, ob, a_v):
         vf = self.compute_vf(ob, a_v)
         return vf[:, 0]
-
