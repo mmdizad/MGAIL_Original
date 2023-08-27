@@ -87,13 +87,13 @@ def mse(pred, target):
 
 
 def onehot(value, depth):
-    a = torch.zeros(depth)
+    a = np.zeros([depth])
     a[value] = 1
     return a
 
 
 def multionehot(values, depth):
-    a = torch.zeros((values.shape[0], depth))
+    a = np.zeros([values.shape[0], depth])
     for i in range(values.shape[0]):
         a[i, int(values[i])] = 1
     return a

@@ -292,24 +292,6 @@ class Runner(object):
         return mb_obs, mb_states, mb_returns, mb_masks, mb_actions,\
                mb_values, mb_all_obs, mh_actions, mh_all_actions, mb_rewards, mb_true_rewards, mb_true_returns
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
 def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.99, lam=0.95, log_interval=1, nprocs=32,
           nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
@@ -350,3 +332,118 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values, all_obs,\
         mh_actions, mh_all_actions, mh_rewards, mh_true_rewards, mh_true_returns = runner.run()
+        
+        d_iters = 1
+        g_loss, e_loss = np.zeros((num_agents, d_iters)), np.zeros((num_agents, d_iters))
+        idx = 0
+        idxs = np.arange(len(all_obs))
+        random.shuffle(idxs)
+        all_obs = all_obs[idxs]
+        mh_actions = [mh_actions[k][idxs] for k in range(num_agents)]
+        mh_obs = [obs[k][idxs] for k in range(num_agents)]
+        mh_values = [values[k][idxs] for k in range(num_agents)]
+        
+        if buffer:
+            buffer.update(mh_obs, mh_actions, None, all_obs, mh_values)
+        else:
+            buffer = Dset(mh_obs, mh_actions, None, all_obs, mh_values, randomize=True, num_agents=num_agents)
+
+        d_minibatch = nenvs * nsteps
+        
+        for d_iter in range(d_iters):
+            e_obs, e_actions, e_all_obs, _ = expert.get_next_batch(d_minibatch)
+            g_obs, g_actions, g_all_obs, _ = buffer.get_next_batch(batch_size=d_minibatch)
+            if disc_type == 'decentralized':
+                for k in range(num_agents):
+                    g_loss[k, d_iter], e_loss[k, d_iter] = discriminator[k].train(
+                        g_obs[k],
+                        g_actions[k],
+                        e_obs[k],
+                        e_actions[k]
+                    )
+                    
+            elif disc_type == 'centralized':
+                g_loss_t, e_loss_t = discriminator.train(
+                    g_all_obs,
+                    np.concatenate(g_actions, axis=1),
+                    e_all_obs, np.concatenate(e_actions, axis=1))
+                g_loss[:, d_iter] = g_loss_t
+                e_loss[:, d_iter] = e_loss_t
+                
+            elif disc_type == 'single':
+                g_loss_t, e_loss_t = discriminator.train(
+                    g_all_obs,
+                    np.concatenate(g_actions, axis=1),
+                    e_all_obs, np.concatenate(e_actions, axis=1))
+                g_loss[:, d_iter] = g_loss_t
+                e_loss[:, d_iter] = e_loss_t
+            else:
+                assert False
+            idx += 1
+            
+        if update > 10:
+            policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
+            
+        model.old_obs = obs
+        nseconds = time.time() - tstart
+        fps = int((update * nbatch) / nseconds)
+        if update % log_interval == 0 or update == 1:
+            ev = [explained_variance(values[k], rewards[k]) for k in range(model.num_agents)]
+            logger.record_tabular("nupdates", update)
+            logger.record_tabular("total_timesteps", update * nbatch)
+            logger.record_tabular("fps", fps)
+
+            for k in range(model.num_agents):
+                logger.record_tabular("explained_variance %d" % k, float(ev[k]))
+                if update > 10:
+                    logger.record_tabular("policy_entropy %d" % k, float(policy_entropy[k]))
+                    logger.record_tabular("policy_loss %d" % k, float(policy_loss[k]))
+                    logger.record_tabular("value_loss %d" % k, float(value_loss[k]))
+                    try:
+                        logger.record_tabular('pearson %d' % k, float(
+                            pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
+                        logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('spearman %d' % k, float(
+                            spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
+                    except:
+                        pass
+            if update > 10 and env_id == 'simple_tag':
+                try:
+                    logger.record_tabular('in_pearson_0_2', float(
+                        pearsonr(rewards[0].flatten(), rewards[2].flatten())[0]))
+                    logger.record_tabular('in_pearson_1_2', float(
+                        pearsonr(rewards[1].flatten(), rewards[2].flatten())[0]))
+                    logger.record_tabular('in_spearman_0_2', float(
+                        spearmanr(rewards[0].flatten(), rewards[2].flatten())[0]))
+                    logger.record_tabular('in_spearman_1_2', float(
+                        spearmanr(rewards[1].flatten(), rewards[2].flatten())[0]))
+                except:
+                    pass
+
+            g_loss_m = np.mean(g_loss, axis=1)
+            e_loss_m = np.mean(e_loss, axis=1)
+            # g_loss_gp_m = np.mean(g_loss_gp, axis=1)
+            # e_loss_gp_m = np.mean(e_loss_gp, axis=1)
+            for k in range(num_agents):
+                logger.record_tabular("g_loss %d" % k, g_loss_m[k])
+                logger.record_tabular("e_loss %d" % k, e_loss_m[k])
+                # logger.record_tabular("g_loss_gp %d" % k, g_loss_gp_m[k])
+                # logger.record_tabular("e_loss_gp %d" % k, e_loss_gp_m[k])
+
+            logger.dump_tabular()
+        
+        if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():
+            savepath = osp.join(logger.get_dir(), 'm_%.5i' % update)
+            print('Saving to', savepath)
+            model.save(savepath)
+            if disc_type == 'decentralized':
+                for k in range(num_agents):
+                    savepath = osp.join(logger.get_dir(), 'd_%d_%.5i' % (k, update))
+                    discriminator[k].save(savepath)
+            elif disc_type == 'centralized':
+                savepath = osp.join(logger.get_dir(), 'd_%.5i' % update)
+                discriminator.save(savepath)
+            elif disc_type == 'single':
+                savepath = osp.join(logger.get_dir(), 'd_%.5i' % update)
+                discriminator.save(savepath)  
+    env.close()
