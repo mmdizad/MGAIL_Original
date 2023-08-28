@@ -5,17 +5,15 @@ import time
 import joblib
 import numpy as np
 import torch
-from scipy.stats import pearsonr, spearmanr
-from rl.acktr.utils_torch import Scheduler, discount_with_dones
-from rl.acktr.utils_torch import cat_entropy, mse, onehot, multionehot
-
-from rl import logger
-from rl.acktr import kfac
-from rl.common.torch_util import set_global_seeds, explained_variance
-from irl.mack.kfac_discriminator_torch import Discriminator
 import torch.nn.functional as F
-# from irl.mack.kfac_discriminator_wgan import Discriminator
 from irl.dataset import Dset
+from irl.mack.kfac_discriminator_torch import Discriminator
+from rl import logger
+from rl.acktr.utils_torch import (Scheduler, cat_entropy, discount_with_dones,
+                                  mse, multionehot, onehot)
+from rl.common.torch_util import explained_variance, set_global_seeds
+from scipy.stats import pearsonr, spearmanr
+
 
 class GeneralModel():
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=2, nsteps=200,
@@ -49,19 +47,19 @@ class GeneralModel():
                 self.step_model.append(self.step_model[-1])
                 self.train_model.append(self.train_model[-1])
             else:
-                self.step_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
-                                         nenvs, 1, nstack, self.device).to(self.device))
                 self.train_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
-                                          nenvs * scale[k], nsteps, nstack, self.device).to(self.device))
+                                            nstack, self.device).to(self.device))
+                self.step_model.append(self.train_model[-1])
                        
         self.optim = []
         self.clones = []
         for k in range(num_agents):
             if identical[k]:
                 self.optim.append(self.optim[-1])
+                self.clones.append(self.clones[-1])
             else:
-                self.optim.append() # TODO
-                self.clones.append() # TODO
+                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr)) # TODO
+                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr))
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
@@ -91,26 +89,21 @@ class GeneralModel():
             A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0))
             ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0))
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0))
-            # new_map.update({
-            #     self.train_model[k].X: np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0),
-            #     self.train_model[k].X_v: np.concatenate([ob.copy() for j in range(k, self.pointer[k])], axis=0),
-            #     A[k]: np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0),
-            #     ADV[k]: np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0),
-            #     R[k]: np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0),
-            #     TODO PG_LR[k]: cur_lr / float(self.scale[k])
-            # })
-            # sess.run(self.train_ops[k], feed_dict=new_map)
+
+
             pi, vf = self.train_model[k](X, X_v, A_v)
             logpac = F.cross_entropy(pi, A)
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf_loss = torch.mean(mse(vf, R))
-            loss = pg_loss + self.vf_coef * vf_loss
-            # TODO optimize using cur_lr
-            policy_loss.append(pg_loss.detach().clone())
-            value_loss.append(vf_loss.detach().clone())
-            policy_entropy.append(entropy.detach().clone())
+            loss = pg_loss + self.vf_coef * vf_loss # TODO use cur_lr
+            self.optim[k].zero_grad()
+            loss.backward()
+            self.optim[k].step()
+            policy_loss.append(pg_loss.detach().cpu())
+            value_loss.append(vf_loss.detach().cpu())
+            policy_entropy.append(entropy.detach().cpu())
         
         return policy_loss, value_loss, policy_entropy
         
@@ -126,8 +119,10 @@ class GeneralModel():
             pi = self.train_model[k].compute_pi(X)
             logpac = F.cross_entropy(pi, A)
             lld = torch.mean(logpac)
-            # TODO optimize using cur_lr
-            lld_loss.append(lld.detach().clone())
+            self.clones[k].zero_grad() # TODO use cur_lr
+            lld.backward()
+            self.clones[k].step()
+            lld_loss.append(lld.detach().cpu())
             
         return lld_loss
 
@@ -135,18 +130,15 @@ class GeneralModel():
         models_dict = {}
         for k in range(self.num_agents):
             key1 = f'train_model{k+1}'
-            key2 = f'step_model{k+1}'
             models_dict[key1] = self.train_model[k].state_dict()
-            models_dict[key2] = self.step_model[k].state_dict()
         torch.save(models_dict, save_path)
 
     def load(self, load_path):
         models_dict = torch.load(load_path)
         for k in range(self.num_agents):
             key1 = f'train_model{k+1}'
-            key2 = f'step_model{k+1}'
             self.train_model[k].load_state_dict(models_dict[key1])
-            self.step_model[k].load_state_dict(models_dict[key2])
+            self.step_model[k] = self.train_model[k]
         
     def step(self, ob, av):
         a, v, s = [], [], []
@@ -155,9 +147,10 @@ class GeneralModel():
         for k in range(self.num_agents):
             a_v = torch.tensor(np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1))
-            a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
-            a.append(a_.detach().clone())
-            v.append(v_.detach().clone())
+            with torch.no_grad():
+                a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a.append(a_.detach().cpu())
+            v.append(v_.detach().cpu())
             s.append(s_)
         return a, v, s
              
@@ -167,8 +160,9 @@ class GeneralModel():
         for k in range(self.num_agents):
             a_v = torch.tensor(np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1))
-            v_ = self.step_model[k].value(ob, a_v)
-            v.append(v_.detach().clone())
+            with torch.no_grad():
+                v_ = self.step_model[k].value(ob, a_v)
+            v.append(v_.detach().cpu())
         return v
     
     

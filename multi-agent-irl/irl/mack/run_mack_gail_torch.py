@@ -13,7 +13,7 @@ from rl import logger
 from rl.common import set_global_seeds
 from rl.common.vec_env.subproc_vec_env import SubprocVecEnv
 from irl.dataset import MADataSet
-from irl.mack.gail import learn # TODO
+from irl.mack.gail import learn
 from sandbox.mack.policies_torch import CategoricalPolicy
 
 def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu, expert_path,

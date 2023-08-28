@@ -1,12 +1,12 @@
-import torch
 import numpy as np
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rl.acktr.utils_torch import fc, sample
 
+
 class CategoricalPolicy(nn.Module):
-    def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces,
-                 nenv, nsteps, nstack, device):
+    def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces, nstack, device):
         print(ob_space)
         print(ac_space)
         print(ob_spaces)
@@ -22,7 +22,7 @@ class CategoricalPolicy(nn.Module):
         self.fc2 = fc(128, nh=128, init_scale=np.sqrt(2))
         self.pi_f = fc(128, nact)
 
-        if len(nenv * nsteps) > 1:
+        if len(ob_spaces) > 1:
             in_space = all_ob_shape + all_ac_shape
         else:
             in_space = all_ob_shape
@@ -41,7 +41,6 @@ class CategoricalPolicy(nn.Module):
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
         pi = self.pi_f(h2)
-
         return pi
     
     def compute_vf(self, obs, a_v):
@@ -70,3 +69,7 @@ class CategoricalPolicy(nn.Module):
     def value(self, ob, a_v):
         vf = self.compute_vf(ob, a_v)
         return vf[:, 0]
+    
+    def policy_params(self):
+        combined_params = list(self.fc1.parameters()) + list(self.fc2.parameters()) + list(self.pi_f.parameters())
+        return combined_params 

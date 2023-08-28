@@ -77,9 +77,9 @@ class Model(object):
                 train_model.append(train_model[-1])
             else:
                 step_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
-                                         nenvs, 1, nstack))
+                                         nenvs, 1, nstack, reuse=False, name='%d' % k))
                 train_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
-                                          nenvs * scale[k], nsteps, nstack))
+                                          nenvs * scale[k], nsteps, nstack, reuse=True, name='%d' % k))
 
             logpac = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=train_model[k].pi, labels=A[k])
