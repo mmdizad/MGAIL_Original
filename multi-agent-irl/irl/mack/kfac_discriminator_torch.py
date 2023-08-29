@@ -73,10 +73,10 @@ class Discriminator(nn.Module):
         return reward
     
     def save_params(self, save_path='disc_model_weights.pth'):
-        torch.save(self.state_dict(), save_path)
+        torch.save(self.state_dict(), save_path) # TODO save optimizer parameters
         
         
     def load_params(self, load_path='disc_model_weights.pth'):
-        self.load_state_dict(torch.load(load_path))
+        self.load_state_dict(torch.load(load_path)) # TODO load optimizer parameters
         
         
