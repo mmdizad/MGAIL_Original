@@ -48,7 +48,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--logdir', type=click.STRING, default='/atlas/u/lantaoyu/exps')
 @click.option('--env', type=click.STRING, default='simple_spread')
 @click.option('--expert_path', type=click.STRING,
-              default='/atlas/u/lantaoyu/projects/MA-AIRL/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint20000-1000tra.pkl')
+              default='./atlas/model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint50000-50000tra.pkl')
 @click.option('--atlas', is_flag=True, flag_value=True)
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
@@ -62,7 +62,7 @@ def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, 
     seeds = [seed]
     batch_sizes = [1000]
 
-    logdir = '/atlas/u/lantaoyu/exps'
+    logdir = './atlas/model'
 
     for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(

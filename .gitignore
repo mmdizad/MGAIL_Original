@@ -1,0 +1,7 @@
+/multi-agent-irl/atlas/
+
+*.pyc
+*.pyo
+
+/*/__pycache__/
+

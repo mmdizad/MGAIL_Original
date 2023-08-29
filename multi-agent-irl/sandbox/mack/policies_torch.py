@@ -7,10 +7,13 @@ from rl.acktr.utils_torch import fc, sample
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces, nstack, device):
+        print('inputs:')
         print(ob_space)
         print(ac_space)
         print(ob_spaces)
         print(ac_spaces)
+        
+        print(ob_space.shape)
         super(CategoricalPolicy, self).__init__()
         self.device = device
         ob_shape = ob_space.shape[0] * nstack
@@ -30,6 +33,8 @@ class CategoricalPolicy(nn.Module):
         self.fc3 = fc(in_space, nh=256, init_scale=np.sqrt(2))
         self.fc4 = fc(256, nh=256, init_scale=np.sqrt(2))
         self.vf_f = fc(256, 1)
+        
+        self.initial_state = [] # not stateful
 
     def forward(self, ob, obs, a_v):
         pi = self.compute_pi(ob)
@@ -37,16 +42,16 @@ class CategoricalPolicy(nn.Module):
         return pi, vf
 
     def compute_pi(self, ob):
-        ob = torch.tensor(ob).to(self.device)
+        ob = torch.tensor(ob, dtype=torch.float32).to(self.device)
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
-        pi = self.pi_f(h2)
+        pi = F.softmax(self.pi_f(h2), dim=1)
         return pi
     
     def compute_vf(self, obs, a_v):
-        obs = torch.tensor(obs).to(self.device)
+        obs = torch.tensor(obs, dtype=torch.float32).to(self.device)
         if a_v is not None:
-            a_v = torch.tensor(a_v).to(self.device)
+            a_v = torch.tensor(a_v, dtype=torch.float32).to(self.device)
             Y = torch.cat([obs, a_v], dim=1)
         else:
             Y = obs

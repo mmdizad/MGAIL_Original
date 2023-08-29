@@ -26,24 +26,25 @@ class GeneralModel():
         nbatch = nenvs * nsteps
         self.num_agents = num_agents = len(ob_space)
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
-        if identical is None:
-            identical = [False for _ in range(self.num_agents)]
+        self.identical = identical
+        if self.identical is None:
+            self.identical = [False for _ in range(self.num_agents)]
             
-        scale = [1 for _ in range(num_agents)]
-        pointer = [i for i in range(num_agents)]
+        self.scale = [1 for _ in range(num_agents)]
+        self.pointer = [i for i in range(num_agents)]
         h = 0
         for k in range(num_agents):
-            if identical[k]:
-                scale[h] += 1
+            if self.identical[k]:
+                self.scale[h] += 1
             else:
-                pointer[h] = k
+                self.pointer[h] = k
                 h = k
-        pointer[h] = num_agents
+        self.pointer[h] = num_agents
         
         self.step_model = []
         self.train_model = []
         for k in range(num_agents):
-            if identical[k]:
+            if self.identical[k]:
                 self.step_model.append(self.step_model[-1])
                 self.train_model.append(self.train_model[-1])
             else:
@@ -54,7 +55,7 @@ class GeneralModel():
         self.optim = []
         self.clones = []
         for k in range(num_agents):
-            if identical[k]:
+            if self.identical[k]:
                 self.optim.append(self.optim[-1])
                 self.clones.append(self.clones[-1])
             else:
@@ -63,6 +64,7 @@ class GeneralModel():
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
+        self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
         
         
     def train(self, obs, states, rewards, masks, actions, values):
@@ -72,9 +74,14 @@ class GeneralModel():
         
         ob = np.concatenate(obs, axis=1)
         
-        policy_loss = value_loss = policy_entropy = []
+        policy_loss = []
+        value_loss = []
+        policy_entropy = []
         for k in range(self.num_agents):
             if self.identical[k]:
+                policy_loss.append(policy_loss[-1])
+                value_loss.append(value_loss[-1])
+                policy_entropy.append(policy_entropy[-1])
                 continue
             A_v = None
             if self.num_agents > 1:
@@ -83,14 +90,13 @@ class GeneralModel():
                         action_v.append(np.concatenate([multionehot(actions[i], self.n_actions[i])
                                                    for i in range(self.num_agents) if i != k], axis=1))
                 action_v = np.concatenate(action_v, axis=0)
-                A_v = torch.tensor(action_v)
-            X = torch.tensor(np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0))
-            X_v = torch.tensor(np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0))
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0))
-            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0))
-            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0))
-
-
+                A_v = action_v
+            X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
+            X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64)
+            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
+            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
+            # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
             logpac = F.cross_entropy(pi, A)
             entropy = torch.mean(cat_entropy(pi))
@@ -101,10 +107,9 @@ class GeneralModel():
             self.optim[k].zero_grad()
             loss.backward()
             self.optim[k].step()
-            policy_loss.append(pg_loss.detach().cpu())
-            value_loss.append(vf_loss.detach().cpu())
-            policy_entropy.append(entropy.detach().cpu())
-        
+            policy_loss.append(pg_loss.clone().detach().cpu().numpy())
+            value_loss.append(vf_loss.clone().detach().cpu().numpy())
+            policy_entropy.append(entropy.clone().detach().cpu().numpy())
         return policy_loss, value_loss, policy_entropy
         
     def clone(self, obs, actions):
@@ -114,15 +119,15 @@ class GeneralModel():
             if self.identical[k]:
                 continue
 
-            X = torch.tensor(np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0))
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0))
+            X = torch.tensor(np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
             pi = self.train_model[k].compute_pi(X)
             logpac = F.cross_entropy(pi, A)
             lld = torch.mean(logpac)
             self.clones[k].zero_grad() # TODO use cur_lr
             lld.backward()
             self.clones[k].step()
-            lld_loss.append(lld.detach().cpu())
+            lld_loss.append(lld.detach().cpu().numpy())
             
         return lld_loss
 
@@ -142,27 +147,26 @@ class GeneralModel():
         
     def step(self, ob, av):
         a, v, s = [], [], []
-        obs = torch.tensor(np.concatenate(ob, axis=1))
-        ob = torch.tensor(ob)
+        obs = np.concatenate(ob, axis=1)
         for k in range(self.num_agents):
-            a_v = torch.tensor(np.concatenate([multionehot(av[i], self.n_actions[i])
-                                  for i in range(self.num_agents) if i != k], axis=1))
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
             with torch.no_grad():
                 a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
-            a.append(a_.detach().cpu())
-            v.append(v_.detach().cpu())
+            a.append(a_.detach().cpu().numpy())
+            v.append(v_.detach().cpu().numpy())
             s.append(s_)
         return a, v, s
              
     def value(self, obs, av):
         v = []
-        ob = torch.tensor(np.concatenate(obs, axis=1))
+        ob = np.concatenate(obs, axis=1)
         for k in range(self.num_agents):
-            a_v = torch.tensor(np.concatenate([multionehot(av[i], self.n_actions[i])
-                                  for i in range(self.num_agents) if i != k], axis=1))
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
             with torch.no_grad():
                 v_ = self.step_model[k].value(ob, a_v)
-            v.append(v_.detach().cpu())
+            v.append(v_.detach().cpu().numpy())
         return v
     
     

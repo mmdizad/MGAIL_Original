@@ -10,10 +10,10 @@ sys.path.append(relative_path)
 import make_env
 from rl import bench
 from rl import logger
-from rl.common import set_global_seeds
+from rl.common.torch_util import set_global_seeds
 from rl.common.vec_env.subproc_vec_env import SubprocVecEnv
 from irl.dataset import MADataSet
-from irl.mack.gail import learn
+from irl.mack.gail_torch import learn
 from sandbox.mack.policies_torch import CategoricalPolicy
 
 def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu, expert_path,
@@ -45,7 +45,8 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--logdir', type=click.STRING, default='/atlas/u/lantaoyu/exps')
 @click.option('--env', type=click.STRING, default='simple_spread')
 @click.option('--expert_path', type=click.STRING,
-              default='./atlas/u/lantaoyu/projects/MA-AIRL/mack/')
+              default='./atlas/model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint50000-50000tra.pkl')
+@click.option('--atlas', is_flag=True, flag_value=True)
 @click.option('--atlas', is_flag=True, flag_value=True)
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
@@ -59,7 +60,7 @@ def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, 
     seeds = [seed]
     batch_sizes = [1000]
 
-    logdir = '/atlas/u/lantaoyu/exps'
+    logdir = './atlas/model'
 
     for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(

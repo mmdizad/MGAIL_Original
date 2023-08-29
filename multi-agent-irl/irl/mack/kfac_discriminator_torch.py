@@ -16,9 +16,9 @@ class Discriminator(nn.Module):
         ob_space = ob_spaces[index]
         ac_space = ac_spaces[index]
         self.ob_shape = ob_space.shape[0] * nstack
-        self.ac_shape = ac_space.shape[0] * nstack
+        self.ac_shape = ac_space.n * nstack
         self.all_ob_shape = sum([obs.shape[0] for obs in ob_spaces]) * nstack
-        self.all_ac_shape = sum([ac.shape[0] for ac in ac_spaces]) * nstack
+        self.all_ac_shape = sum([ac.n for ac in ac_spaces]) * nstack
         self.device = device
                 
         if disc_type == 'decentralized':
@@ -44,14 +44,12 @@ class Discriminator(nn.Module):
     
     
     def forward(self, ob, act):
-        ob, act = torch.tensor(ob).to(self.device), torch.tensor(act).to(self.device)
+        ob, act = torch.tensor(ob, dtype=torch.float32).to(self.device),\
+            torch.tensor(act, dtype=torch.float32).to(self.device)
         score = self.disc(torch.cat([ob, act], dim=1))
         return score
     
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
-        ob_pi, act_pi, ob_exp, act_exp =\
-            torch.tensor(ob_pi).to(self.device), torch.tensor(act_pi).to(self.device),\
-                torch.tensor(ob_exp).to(self.device), torch.tensor(act_exp).to(self.device)
         loss_pi, loss_exp = self.calculate_loss(ob_pi, act_pi, ob_exp, act_exp)
         loss = loss_pi + loss_exp
         self.optimizer.zero_grad()
@@ -60,6 +58,11 @@ class Discriminator(nn.Module):
         return loss_pi.detach().cpu(), loss_exp.detach().cpu()
     
     def calculate_loss(self, ob_pi, act_pi, ob_exp, act_exp):
+        ob_pi, act_pi, ob_exp, act_exp =\
+            torch.tensor(ob_pi, dtype=torch.float32).to(self.device),\
+                torch.tensor(act_pi, dtype=torch.float32).to(self.device),\
+                torch.tensor(ob_exp, dtype=torch.float32).to(self.device),\
+                torch.tensor(act_exp, dtype=torch.float32).to(self.device)
         logits_pi = self.disc(torch.cat([ob_pi, act_pi], dim=1))
         logits_exp = self.disc(torch.cat([ob_exp, act_exp], dim=1))
         #  maximize E_{\pi} log(D) + E_{exp} log(-D)
@@ -69,14 +72,14 @@ class Discriminator(nn.Module):
     
     def get_reward(self, ob, act):
         score = self.forward(ob, act)
-        reward = torch.log(F.sigmoid(score) + 1e-10)
-        return reward
+        reward = torch.log(torch.sigmoid(score) + 1e-10)
+        return reward.detach().cpu().numpy()
     
-    def save_params(self, save_path='disc_model_weights.pth'):
+    def save(self, save_path='disc_model_weights.pth'):
         torch.save(self.state_dict(), save_path) # TODO save optimizer parameters
         
         
-    def load_params(self, load_path='disc_model_weights.pth'):
+    def load(self, load_path='disc_model_weights.pth'):
         self.load_state_dict(torch.load(load_path)) # TODO load optimizer parameters
         
         
