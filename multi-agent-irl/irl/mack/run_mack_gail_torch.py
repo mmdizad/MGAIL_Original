@@ -60,7 +60,7 @@ def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, 
     seeds = [seed]
     batch_sizes = [1000]
 
-    logdir = './atlas/model'
+    logdir = './atlas/our_model'
 
     for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(
