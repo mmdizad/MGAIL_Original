@@ -68,7 +68,7 @@ class CategoricalPolicy(nn.Module):
 
     def step(self, ob, obs, a_v):
         pi, v = self.forward(ob, obs, a_v)
-        a = sample(pi)
+        a = sample(pi, self.device)
         return a, v, [] # dummy state
 
     def value(self, ob, a_v):
