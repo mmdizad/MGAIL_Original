@@ -91,7 +91,7 @@ class JSONOutputFormat(OutputFormat):
         self.file.flush()
 
 
-class TensorBoardOutputFormat:
+class TensorBoardOutputFormat(OutputFormat):
     """
     Dumps key/value pairs into TensorBoard's numeric format using tensorboardX.
     """
@@ -249,7 +249,7 @@ class Logger(object):
     # ----------------------------------------
     def _do_log(self, args):
         for fmt in self.output_formats:
-            fmt.writekvs(args)
+            fmt.writeseq(args)
 
 Logger.DEFAULT = Logger.CURRENT = Logger(dir=None, output_formats=[HumanOutputFormat(sys.stdout)])
 
