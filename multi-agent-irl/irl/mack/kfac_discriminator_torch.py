@@ -44,9 +44,12 @@ class Discriminator(nn.Module):
     
     
     def forward(self, ob, act):
+        print(ob.shape)
         ob, act = torch.tensor(ob, dtype=torch.float32).to(self.device),\
             torch.tensor(act, dtype=torch.float32).to(self.device)
+        print(ob.shape)
         score = self.disc(torch.cat([ob, act], dim=1))
+        print(score.shape)
         return score
     
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
