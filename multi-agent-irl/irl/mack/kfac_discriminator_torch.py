@@ -65,9 +65,19 @@ class Discriminator(nn.Module):
                 torch.tensor(act_exp, dtype=torch.float32).to(self.device)
         logits_pi = self.disc(torch.cat([ob_pi, act_pi], dim=1))
         logits_exp = self.disc(torch.cat([ob_exp, act_exp], dim=1))
+        labels_pi = torch.zeros((ob_pi.shape[0] + act_pi.shape[0], 1))
+        labels_exp = torch.ones((ob_exp.shape[0] + act_exp.shape[0], 1))
+        print(labels_pi.shape)
+        print(labels_exp.shape)
+        print(logits_pi.shape)
+        print(logits_exp.shape)
+        loss_pi = F.binary_cross_entropy_with_logits(logits_pi, labels_pi)
+        loss_exp = F.binary_cross_entropy_with_logits(logits_exp, labels_exp)
+
         #  maximize E_{\pi} log(D) + E_{exp} log(-D)
-        loss_pi = torch.mean(-F.logsigmoid(logits_pi))
-        loss_exp = torch.mean(-F.logsigmoid(-logits_exp))
+        # loss_pi = torch.mean(-F.logsigmoid(logits_pi))
+        # loss_exp = torch.mean(-F.logsigmoid(-logits_exp))
+        
         return loss_pi, loss_exp
     
     def get_reward(self, ob, act):
