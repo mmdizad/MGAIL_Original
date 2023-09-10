@@ -44,12 +44,9 @@ class Discriminator(nn.Module):
     
     
     def forward(self, ob, act):
-        print(ob.shape)
         ob, act = torch.tensor(ob, dtype=torch.float32).to(self.device),\
             torch.tensor(act, dtype=torch.float32).to(self.device)
-        print(ob.shape)
         score = self.disc(torch.cat([ob, act], dim=1))
-        print(score.shape)
         return score
     
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
@@ -61,16 +58,10 @@ class Discriminator(nn.Module):
         return loss_pi.detach().cpu(), loss_exp.detach().cpu()
     
     def calculate_loss(self, ob_pi, act_pi, ob_exp, act_exp):
-        print(ob_pi.shape)
-        print(act_pi.shape)
         logits_pi = self.forward(ob_pi, act_pi)
         logits_exp = self.forward(ob_exp, act_exp)
-        labels_pi = torch.zeros((ob_pi.shape[0] + act_pi.shape[0], 1))
-        labels_exp = torch.ones((ob_exp.shape[0] + act_exp.shape[0], 1))
-        print(labels_pi.shape)
-        print(labels_exp.shape)
-        print(logits_pi.shape)
-        print(logits_exp.shape)
+        labels_pi = torch.zeros((ob_pi.shape[0], 1))
+        labels_exp = torch.ones((ob_exp.shape[0], 1))
         loss_pi = F.binary_cross_entropy_with_logits(logits_pi, labels_pi)
         loss_exp = F.binary_cross_entropy_with_logits(logits_exp, labels_exp)
 
