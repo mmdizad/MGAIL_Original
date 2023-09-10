@@ -63,7 +63,7 @@ class Discriminator(nn.Module):
                 torch.tensor(act_pi, dtype=torch.float32).to(self.device),\
                 torch.tensor(ob_exp, dtype=torch.float32).to(self.device),\
                 torch.tensor(act_exp, dtype=torch.float32).to(self.device)
-        print(torch.cat([ob_pi, act_pi]).shape)
+        print(torch.cat([ob_pi, act_pi], dim=1).shape)
         logits_pi = self.disc(torch.cat([ob_pi, act_pi], dim=1))
         logits_exp = self.disc(torch.cat([ob_exp, act_exp], dim=1))
         labels_pi = torch.zeros((ob_pi.shape[0] + act_pi.shape[0], 1))
