@@ -249,7 +249,7 @@ class Logger(object):
     # ----------------------------------------
     def _do_log(self, args):
         for fmt in self.output_formats:
-            fmt.writeseq(args)
+            fmt.writekvs(args)
 
 Logger.DEFAULT = Logger.CURRENT = Logger(dir=None, output_formats=[HumanOutputFormat(sys.stdout)])
 
