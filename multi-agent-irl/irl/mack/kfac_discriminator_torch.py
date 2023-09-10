@@ -60,8 +60,8 @@ class Discriminator(nn.Module):
     def calculate_loss(self, ob_pi, act_pi, ob_exp, act_exp):
         logits_pi = self.forward(ob_pi, act_pi)
         logits_exp = self.forward(ob_exp, act_exp)
-        labels_pi = torch.zeros((ob_pi.shape[0], 1))
-        labels_exp = torch.ones((ob_exp.shape[0], 1))
+        labels_pi = torch.zeros((ob_pi.shape[0], 1), device=self.device)
+        labels_exp = torch.ones((ob_exp.shape[0], 1), device=self.device)
         loss_pi = F.binary_cross_entropy_with_logits(logits_pi, labels_pi)
         loss_exp = F.binary_cross_entropy_with_logits(logits_exp, labels_exp)
 
