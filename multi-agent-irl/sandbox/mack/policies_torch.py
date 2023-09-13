@@ -7,13 +7,6 @@ from rl.acktr.utils_torch import fc, sample
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, ob_space, ac_space, ob_spaces, ac_spaces, nstack, device):
-        print('inputs:')
-        print(ob_space)
-        print(ac_space)
-        print(ob_spaces)
-        print(ac_spaces)
-        
-        print(ob_space.shape)
         super(CategoricalPolicy, self).__init__()
         self.device = device
         ob_shape = ob_space.shape[0] * nstack
@@ -45,7 +38,7 @@ class CategoricalPolicy(nn.Module):
         ob = torch.tensor(ob, dtype=torch.float32).to(self.device)
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
-        pi = F.softmax(self.pi_f(h2), dim=1)
+        pi = self.pi_f(h2)
         return pi
     
     def compute_vf(self, obs, a_v):
