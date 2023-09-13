@@ -63,6 +63,7 @@ class GeneralModel():
                 self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr))
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
+
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
         
@@ -71,6 +72,8 @@ class GeneralModel():
         advs = [rewards[k] - values[k] for k in range(self.num_agents)]
         for _ in range(len(obs)):
             cur_lr = self.lr.value()
+        print(f'new lr: {cur_lr}')
+
         
         ob = np.concatenate(obs, axis=1)
         
@@ -98,12 +101,24 @@ class GeneralModel():
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-            logpac = F.cross_entropy(pi, A)
+            print('pi:')
+            print(pi)
+            print('A:')
+            print(A)
+            print(pi.shape)
+            print(A.shape)
+            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            print(f'logpac: {logpac}')
+            print('####################')
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf_loss = torch.mean(mse(vf, R))
-            loss = pg_loss + self.vf_coef * vf_loss # TODO use cur_lr
+            loss = pg_loss + self.vf_coef * vf_loss
+
+            for g in self.optim[k].param_groups:
+                g['lr'] = cur_lr
+
             self.optim[k].zero_grad()
             loss.backward()
             self.optim[k].step()
@@ -151,8 +166,7 @@ class GeneralModel():
         for k in range(self.num_agents):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
-            with torch.no_grad():
-                a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -224,7 +238,7 @@ class Runner(object):
                 rewards = rewards.swapaxes(1, 0)
             else:
                 assert False
-
+            
             self.actions = actions
             for k in range(self.num_agents):
                 mb_obs[k].append(np.copy(self.obs[k]))
@@ -233,21 +247,24 @@ class Runner(object):
                 mb_dones[k].append(self.dones[k])
                 mb_rewards[k].append(rewards[k])
             actions_list = []
+            
             for i in range(self.nenv):
                 actions_list.append([onehot(actions[k][i], self.n_actions[k]) for k in range(self.num_agents)])
             obs, true_rewards, dones, _ = self.env.step(actions_list)
             self.states = states
             self.dones = dones
+            
             for k in range(self.num_agents):
                 for ni, done in enumerate(dones[k]):
                     if done:
                         self.obs[k][ni] = self.obs[k][ni] * 0.0
             self.update_obs(obs)
+
             for k in range(self.num_agents):
                 mb_true_rewards[k].append(true_rewards[k])
+            
         for k in range(self.num_agents):
             mb_dones[k].append(self.dones[k])
-
         # batch of steps to batch of rollouts
         for k in range(self.num_agents):
             mb_obs[k] = np.asarray(mb_obs[k], dtype=np.float32).swapaxes(1, 0).reshape(self.batch_ob_shape[k])
@@ -258,8 +275,7 @@ class Runner(object):
             mb_dones[k] = np.asarray(mb_dones[k], dtype=np.bool).swapaxes(1, 0)
             mb_masks[k] = mb_dones[k][:, :-1]
             mb_dones[k] = mb_dones[k][:, 1:]
-
-
+            
         mb_returns = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
         mb_true_returns = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
         last_values = self.model.value(self.obs, self.actions)
@@ -294,6 +310,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
           nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
           bc_iters=500, identical=None):
+    start_time = time.time()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
     buffer = None
@@ -326,11 +343,10 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     runner = Runner(env, model, discriminator, nsteps=nsteps, nstack=nstack, gamma=gamma, lam=lam, disc_type=disc_type)
     nbatch = nenvs * nsteps
     tstart = time.time()
-    
+    print("--- init %s seconds ---" % (time.time() - start_time))
     for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values, all_obs,\
         mh_actions, mh_all_actions, mh_rewards, mh_true_rewards, mh_true_returns = runner.run()
-        
         d_iters = 1
         g_loss, e_loss = np.zeros((num_agents, d_iters)), np.zeros((num_agents, d_iters))
         idx = 0
@@ -347,7 +363,6 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             buffer = Dset(mh_obs, mh_actions, None, all_obs, mh_values, randomize=True, num_agents=num_agents)
 
         d_minibatch = nenvs * nsteps
-        
         for d_iter in range(d_iters):
             e_obs, e_actions, e_all_obs, _ = expert.get_next_batch(d_minibatch)
             g_obs, g_actions, g_all_obs, _ = buffer.get_next_batch(batch_size=d_minibatch)
@@ -359,7 +374,6 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                         e_obs[k],
                         e_actions[k]
                     )
-                    
             elif disc_type == 'centralized':
                 g_loss_t, e_loss_t = discriminator.train(
                     g_all_obs,
@@ -378,43 +392,41 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             else:
                 assert False
             idx += 1
-            
-        if update > 10:
+        if update > 50:
             policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
-            
         model.old_obs = obs
         nseconds = time.time() - tstart
         fps = int((update * nbatch) / nseconds)
         if update % log_interval == 0 or update == 1:
             ev = [explained_variance(values[k], rewards[k]) for k in range(model.num_agents)]
-            logger.record_tabular("nupdates", update)
-            logger.record_tabular("total_timesteps", update * nbatch)
-            logger.record_tabular("fps", fps)
+            logger.record_tabular("data/nupdates", update)
+            logger.record_tabular("data/total_timesteps", update * nbatch)
+            logger.record_tabular("data/fps", fps)
 
             for k in range(model.num_agents):
-                logger.record_tabular("explained_variance %d" % k, float(ev[k]))
-                if update > 10:
-                    logger.record_tabular("policy_entropy %d" % k, float(policy_entropy[k]))
-                    logger.record_tabular("policy_loss %d" % k, float(policy_loss[k]))
-                    logger.record_tabular("value_loss %d" % k, float(value_loss[k]))
+                logger.record_tabular("data/explained_variance %d" % k, float(ev[k]))
+                if update > 50:
+                    logger.record_tabular("data/policy_entropy %d" % k, float(policy_entropy[k]))
+                    logger.record_tabular("data/policy_loss %d" % k, float(policy_loss[k]))
+                    logger.record_tabular("data/value_loss %d" % k, float(value_loss[k]))
                     try:
-                        logger.record_tabular('pearson %d' % k, float(
+                        logger.record_tabular('data/pearson %d' % k, float(
                             pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
-                        logger.record_tabular('true reward %d' % k, float(np.mean(mh_true_returns[k])))
-                        logger.record_tabular('spearman %d' % k, float(
+                        logger.record_tabular('data/reward %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('data/true reward %d' % k, float(np.mean(mh_true_returns[k])))
+                        logger.record_tabular('data/spearman %d' % k, float(
                             spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                     except:
                         pass
             if update > 10 and env_id == 'simple_tag':
                 try:
-                    logger.record_tabular('in_pearson_0_2', float(
+                    logger.record_tabular('data/in_pearson_0_2', float(
                         pearsonr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('in_pearson_1_2', float(
+                    logger.record_tabular('data/in_pearson_1_2', float(
                         pearsonr(rewards[1].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('in_spearman_0_2', float(
+                    logger.record_tabular('data/in_spearman_0_2', float(
                         spearmanr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('in_spearman_1_2', float(
+                    logger.record_tabular('data/in_spearman_1_2', float(
                         spearmanr(rewards[1].flatten(), rewards[2].flatten())[0]))
                 except:
                     pass
@@ -424,13 +436,12 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             # g_loss_gp_m = np.mean(g_loss_gp, axis=1)
             # e_loss_gp_m = np.mean(e_loss_gp, axis=1)
             for k in range(num_agents):
-                logger.record_tabular("g_loss %d" % k, g_loss_m[k])
-                logger.record_tabular("e_loss %d" % k, e_loss_m[k])
+                logger.record_tabular("data/g_loss %d" % k, g_loss_m[k])
+                logger.record_tabular("data/e_loss %d" % k, e_loss_m[k])
                 # logger.record_tabular("g_loss_gp %d" % k, g_loss_gp_m[k])
                 # logger.record_tabular("e_loss_gp %d" % k, e_loss_gp_m[k])
 
             logger.dump_tabular()
-        
         if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():
             savepath = osp.join(logger.get_dir(), 'm_%.5i' % update)
             print('Saving to', savepath)

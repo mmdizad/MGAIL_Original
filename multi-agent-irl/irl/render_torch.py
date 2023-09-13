@@ -6,12 +6,13 @@ relative_path = relative_path.replace('multi-agent-irl', 'multi-agent-particle-e
 sys.path.append(relative_path)
 import multiagent
 import time
-import tensorflow as tf
+import torch
 import make_env
 import numpy as np
-from rl.common.misc_util import set_global_seeds
-from sandbox.mack.acktr_disc import Model, onehot
-from sandbox.mack.policies import CategoricalPolicy
+from rl.common.torch_util import set_global_seeds
+from sandbox.mack.acktr_disc import onehot
+from irl.mack.gail_torch import GeneralModel as Model
+from sandbox.mack.policies_torch import CategoricalPolicy
 from rl import bench
 import imageio
 import pickle as pkl
@@ -23,8 +24,6 @@ import pickle as pkl
                                           'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_spread')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
-    tf.reset_default_graph()
-
     env_id = env
 
     def create_env():
@@ -35,7 +34,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './atlas/trained_model/gail/simple_spread/decentralized/s-200/l-0.1-b-1000-d-0.1-c-500/seed-1/m_55000'
+    path = './atlas/final_model/gail/simple_spread/decentralized/s-200/l-0.01-b-1000-d-0.01-c-500/seed-1/m_05000'
 
     print(path)
     n_agents = len(env.action_space)
@@ -49,18 +48,19 @@ def render(env, image):
     print(ac_space)
 
     n_actions = [action.n for action in ac_space]
-
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     make_model = lambda: Model(
-        CategoricalPolicy, ob_space, ac_space, 1, total_timesteps=1e7, nprocs=2, nsteps=500,
+        CategoricalPolicy, ob_space, ac_space, 1, total_timesteps=1e7, device=device, nprocs=2, nsteps=500,
         nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.01, max_grad_norm=0.5, kfac_clip=0.001,
-        lrschedule='linear', identical=make_env.get_identical(env_id), use_kfac=False)
+        lrschedule='linear', identical=make_env.get_identical(env_id))
+
     model = make_model()
     print("load model from", path)
     model.load(path)
 
     images = []
     sample_trajs = []
-    num_trajs = 100
+    num_trajs = 20
     max_steps = 50
     avg_ret = [[] for _ in range(n_agents)]
 
