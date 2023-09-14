@@ -55,7 +55,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--bc_iters', type=click.INT, default=500)
 def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, dis_lr, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [0.1]
+    lrs = [0.001]
     seeds = [seed]
     batch_sizes = [1000]
 

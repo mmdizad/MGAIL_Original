@@ -544,6 +544,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                         logger.record_tabular('pearson %d' % k, float(
                             pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                         logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('true reward %d' % k, float(np.mean(mh_true_returns[k])))
                         logger.record_tabular('spearman %d' % k, float(
                             spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                     except:

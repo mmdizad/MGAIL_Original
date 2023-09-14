@@ -73,7 +73,7 @@ class Discriminator(nn.Module):
     
     def get_reward(self, ob, act):
         score = self.forward(ob, act)
-        reward = torch.log(torch.sigmoid(score) + 1e-10)
+        reward = torch.nn.LogSigmoid()(score)
         return reward.detach().cpu().numpy()
     
     def save(self, save_path='disc_model_weights.pth'):
