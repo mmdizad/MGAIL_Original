@@ -18,8 +18,8 @@ from scipy.stats import pearsonr, spearmanr
 class GeneralModel():
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=2, nsteps=200,
                  nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
-                kfac_clip=0.001, lrschedule='linear', identical=None):
-        
+                kfac_clip=0.001, lrschedule='linear', identical=None, weight_decay=0):
+                
         self.vf_coef = vf_coef
         self.ent_coef = ent_coef
         self.device = device
@@ -61,8 +61,8 @@ class GeneralModel():
                 self.optim.append(self.optim[-1])
                 self.clones.append(self.clones[-1])
             else:
-                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=1e-3))
-                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=1e-3))
+                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=weight_decay))
+                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=weight_decay))
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
@@ -315,7 +315,7 @@ class Runner(object):
 def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.99, lam=0.95, log_interval=1, nprocs=32,
           nsteps=20, nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
-          bc_iters=500, identical=None, d_iters=1):
+          bc_iters=500, identical=None, d_iters=1, weight_decay=1e-4):
     start_time = time.time()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
@@ -328,7 +328,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     make_model = lambda: GeneralModel(policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=nprocs, nsteps=nsteps,
                                nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=vf_fisher_coef,
                                lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
-                               lrschedule=lrschedule, identical=identical)
+                               lrschedule=lrschedule, identical=identical, weight_decay=weight_decay)
     if save_interval and logger.get_dir():
         import cloudpickle
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
