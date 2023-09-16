@@ -23,6 +23,7 @@ class GeneralModel():
         self.vf_coef = vf_coef
         self.ent_coef = ent_coef
         self.device = device
+        self.max_grad_norm = max_grad_norm
         nbatch = nenvs * nsteps
         self.num_agents = num_agents = len(ob_space)
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
@@ -54,16 +55,16 @@ class GeneralModel():
                        
         self.optim = []
         self.clones = []
+        # optimizers
         for k in range(num_agents):
             if self.identical[k]:
                 self.optim.append(self.optim[-1])
                 self.clones.append(self.clones[-1])
             else:
-                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr)) # TODO
-                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr))
+                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=1e-3))
+                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=1e-3))
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
         
@@ -72,9 +73,7 @@ class GeneralModel():
         advs = [rewards[k] - values[k] for k in range(self.num_agents)]
         for _ in range(len(obs)):
             cur_lr = self.lr.value()
-        print(f'new lr: {cur_lr}')
 
-        
         ob = np.concatenate(obs, axis=1)
         
         policy_loss = []
@@ -101,24 +100,27 @@ class GeneralModel():
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
+            print(f'ADV:\n{ADV}')
             print('pi:')
             print(pi)
             print('A:')
             print(A)
-            print(pi.shape)
-            print(A.shape)
+
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
             print(f'logpac: {logpac}')
-            print('####################')
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
-            vf_loss = torch.mean(mse(vf, R))
+            vf = torch.squeeze(vf)
+            vf_loss = torch.nn.MSELoss()(vf, R)
+            print(f'vf: {vf}')
+            print(f'R: {R}')
             loss = pg_loss + self.vf_coef * vf_loss
-
+            print('#' * 50)
             for g in self.optim[k].param_groups:
-                g['lr'] = cur_lr
+                g['lr'] = cur_lr / float(self.scale[k])
 
+            torch.nn.utils.clip_grad_norm(self.train_model[k].parameters(), self.max_grad_norm)
             self.optim[k].zero_grad()
             loss.backward()
             self.optim[k].step()
@@ -137,9 +139,13 @@ class GeneralModel():
             X = torch.tensor(np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
             A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
             pi = self.train_model[k].compute_pi(X)
-            logpac = F.cross_entropy(pi, A)
+            logpac = torch.nn.CrossEntropyLoss()(pi, A)
             lld = torch.mean(logpac)
-            self.clones[k].zero_grad() # TODO use cur_lr
+            for g in self.clones[k].param_groups:
+                g['lr'] = cur_lr / float(self.scale[k])
+
+            torch.nn.utils.clip_grad_norm(self.train_model[k].policy_params(), self.max_grad_norm)
+            self.clones[k].zero_grad()
             lld.backward()
             self.clones[k].step()
             lld_loss.append(lld.detach().cpu().numpy())
@@ -307,9 +313,9 @@ class Runner(object):
                mb_values, mb_all_obs, mh_actions, mh_all_actions, mb_rewards, mb_true_rewards, mb_true_returns
 
 def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.99, lam=0.95, log_interval=1, nprocs=32,
-          nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
+          nsteps=20, nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
-          bc_iters=500, identical=None):
+          bc_iters=500, identical=None, d_iters=1):
     start_time = time.time()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
@@ -347,7 +353,6 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values, all_obs,\
         mh_actions, mh_all_actions, mh_rewards, mh_true_rewards, mh_true_returns = runner.run()
-        d_iters = 1
         g_loss, e_loss = np.zeros((num_agents, d_iters)), np.zeros((num_agents, d_iters))
         idx = 0
         idxs = np.arange(len(all_obs))
@@ -392,7 +397,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             else:
                 assert False
             idx += 1
-        if update > 50:
+        if update > 10:
             policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
         model.old_obs = obs
         nseconds = time.time() - tstart
@@ -404,8 +409,8 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             logger.record_tabular("data/fps", fps)
 
             for k in range(model.num_agents):
-                logger.record_tabular("data/explained_variance %d" % k, float(ev[k]))
-                if update > 50:
+                logger.record_tabular("explained_variance %d" % k, float(ev[k]))
+                if update > 10:
                     logger.record_tabular("data/policy_entropy %d" % k, float(policy_entropy[k]))
                     logger.record_tabular("data/policy_loss %d" % k, float(policy_loss[k]))
                     logger.record_tabular("data/value_loss %d" % k, float(value_loss[k]))

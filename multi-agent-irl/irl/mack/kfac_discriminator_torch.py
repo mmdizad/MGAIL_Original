@@ -30,7 +30,7 @@ class Discriminator(nn.Module):
                                          output_shape=self.num_outputs)
         else:
             assert False
-        self.optimizer = optim.SGD(self.parameters(), lr=learning_rate) # TODO scheduler support
+        self.optimizer = optim.SGD(self.parameters(), lr=learning_rate, weight_decay=1e-3) # TODO scheduler support
         
     def build_graph(self, input_shape, output_shape):
         disc = nn.Sequential(

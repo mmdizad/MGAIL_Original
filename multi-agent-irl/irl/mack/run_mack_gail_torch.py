@@ -35,9 +35,10 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     print(num_cpu)
     policy_fn = CategoricalPolicy
     expert = MADataSet(expert_path, ret_threshold=ret_threshold, traj_limitation=traj_limitation)
-    learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1), nprocs=num_cpu,
-          nsteps=timesteps_per_batch // num_cpu, lr=lr, ent_coef=0.0, dis_lr=dis_lr,
-          disc_type=disc_type, bc_iters=bc_iters, identical=make_env.get_identical(env_id))
+    learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1),
+     nprocs=num_cpu, nsteps=timesteps_per_batch // num_cpu, lr=lr, vf_coef=1, ent_coef=0.0,
+        dis_lr=dis_lr, disc_type=disc_type, bc_iters=bc_iters,
+        identical=make_env.get_identical(env_id), d_iters=2)
     env.close()
 
 
@@ -55,7 +56,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--bc_iters', type=click.INT, default=500)
 def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, dis_lr, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [0.001]
+    lrs = [0.0001]
     seeds = [seed]
     batch_sizes = [1000]
 

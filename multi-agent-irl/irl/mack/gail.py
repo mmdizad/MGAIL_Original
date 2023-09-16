@@ -187,7 +187,10 @@ class Model(object):
                     action_v = np.concatenate(action_v, axis=0)
                     new_map.update({train_model[k].A_v: action_v})
                     td_map.update({train_model[k].A_v: action_v})
-
+                print(f'rewards: {rewards[k]}')
+                print(rewards[k].shape)
+                print(f'advs: {advs[k]}')
+                print(advs[k].shape)
                 new_map.update({
                     train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
                     train_model[k].X_v: np.concatenate([ob.copy() for j in range(k, pointer[k])], axis=0),
@@ -196,6 +199,8 @@ class Model(object):
                     R[k]: np.concatenate([rewards[j] for j in range(k, pointer[k])], axis=0),
                     PG_LR[k]: cur_lr / float(scale[k])
                 })
+                print("pi")
+                print(sess.run(train_model[k].pi, feed_dict=new_map))
                 sess.run(train_ops[k], feed_dict=new_map)
                 td_map.update(new_map)
 
