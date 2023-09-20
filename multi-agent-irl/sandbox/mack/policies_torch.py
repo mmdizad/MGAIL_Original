@@ -61,7 +61,13 @@ class CategoricalPolicy(nn.Module):
 
     def step(self, ob, obs, a_v):
         pi, v = self.forward(ob, obs, a_v)
+        pi = F.softmax(pi, dim=1)
         a = sample(pi, self.device)
+        return a, v[:, 0], [] # dummy state
+
+    def best_step(self, ob, obs, a_v):
+        pi, v = self.forward(ob, obs, a_v)
+        a = torch.argmax(pi, dim=1)
         return a, v[:, 0], [] # dummy state
 
     def value(self, ob, a_v):

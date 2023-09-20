@@ -100,11 +100,11 @@ class GeneralModel():
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-            print(f'ADV:\n{ADV}')
+            print(f'ADV:\n{ADV[0:40]}')
             print('pi:')
-            print(pi)
+            print(pi[0:40])
             print('A:')
-            print(A)
+            print(A[0:40])
 
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
             print(f'logpac: {logpac}')
@@ -113,14 +113,14 @@ class GeneralModel():
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
             vf_loss = torch.nn.MSELoss()(vf, R)
-            print(f'vf: {vf}')
-            print(f'R: {R}')
+            print(f'vf: {vf[0:40]}')
+            print(f'R: {R[0:40]}')
             loss = pg_loss + self.vf_coef * vf_loss
             print('#' * 50)
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
-            torch.nn.utils.clip_grad_norm(self.train_model[k].parameters(), self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].parameters(), self.max_grad_norm)
             self.optim[k].zero_grad()
             loss.backward()
             self.optim[k].step()
@@ -136,15 +136,15 @@ class GeneralModel():
             if self.identical[k]:
                 continue
 
-            X = torch.tensor(np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32)
+            X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             pi = self.train_model[k].compute_pi(X)
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
             lld = torch.mean(logpac)
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
-            torch.nn.utils.clip_grad_norm(self.train_model[k].policy_params(), self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].policy_params(), self.max_grad_norm)
             self.clones[k].zero_grad()
             lld.backward()
             self.clones[k].step()
@@ -173,6 +173,18 @@ class GeneralModel():
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
             a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a.append(a_.detach().cpu().numpy())
+            v.append(v_.detach().cpu().numpy())
+            s.append(s_)
+        return a, v, s
+
+    def best_step(self, ob, av):
+        a, v, s = [], [], []
+        obs = np.concatenate(ob, axis=1)
+        for k in range(self.num_agents):
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
+            a_, v_, s_ = self.step_model[k].best_step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -349,7 +361,15 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     runner = Runner(env, model, discriminator, nsteps=nsteps, nstack=nstack, gamma=gamma, lam=lam, disc_type=disc_type)
     nbatch = nenvs * nsteps
     tstart = time.time()
+
+    for _ in range(bc_iters):
+        e_obs, e_actions, _, _ = expert.get_next_batch(nenvs * nsteps)
+        e_a = [np.argmax(e_actions[k], axis=1) for k in range(len(e_actions))]
+        lld_loss = model.clone(e_obs, e_a)
+        # print(lld_loss)
+
     print("--- init %s seconds ---" % (time.time() - start_time))
+
     for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values, all_obs,\
         mh_actions, mh_all_actions, mh_rewards, mh_true_rewards, mh_true_returns = runner.run()

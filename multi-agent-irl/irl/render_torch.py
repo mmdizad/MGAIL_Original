@@ -34,7 +34,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './atlas/test0.01/gail/simple_spread/decentralized/s-200/l-0.01-b-1000-d-0.1-c-500/seed-1/m_02000'
+    path = './atlas/test6/gail/simple_spread/decentralized/s-200/l-0.0003-b-2000-d-0.0003-c-500/seed-1/m_17000'
 
     print(path)
     n_agents = len(env.action_space)
@@ -76,7 +76,7 @@ def render(env, image):
         step = 0
         done = False
         while not done:
-            action, _, _ = model.step(obs, action)
+            action, _, _ = model.best_step(obs, action)
             actions_list = [onehot(action[k][0], n_actions[k]) for k in range(n_agents)]
             # actions_list = [onehot(np.random.randint(n_actions[k]), n_actions[k]) for k in range(n_agents)]
 
