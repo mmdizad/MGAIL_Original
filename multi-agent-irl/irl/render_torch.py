@@ -34,7 +34,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './atlas/test6/gail/simple_spread/decentralized/s-200/l-0.0003-b-2000-d-0.0003-c-500/seed-1/m_17000'
+    path = './atlas/lower-w/low_lr/gail/simple_spread/decentralized/s-200/l-0.0002-b-1000-d-0.0002-c-5000/seed-1/m_01100'
 
     print(path)
     n_agents = len(env.action_space)

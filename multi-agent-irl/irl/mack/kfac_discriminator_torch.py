@@ -9,8 +9,9 @@ disc_types = ['decentralized', 'centralized', 'single']
 class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
-                 learning_rate=0.01, total_steps=50000):
+                 learning_rate=0.01, total_steps=50000, max_grad_norm=0.5, weight_decay=1e-4):
         super(Discriminator, self).__init__()
+        self.max_grad_norm = max_grad_norm
         self.hidden_size = hidden_size        
         self.num_outputs = len(ob_spaces) if disc_type == 'centralized' else 1
         ob_space = ob_spaces[index]
@@ -30,7 +31,7 @@ class Discriminator(nn.Module):
                                          output_shape=self.num_outputs)
         else:
             assert False
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=5e-4) # TODO scheduler support
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay) # TODO scheduler support
         
     def build_graph(self, input_shape, output_shape):
         disc = nn.Sequential(
@@ -54,6 +55,7 @@ class Discriminator(nn.Module):
         loss = loss_pi + loss_exp
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
         self.optimizer.step()
         return loss_pi.detach().cpu(), loss_exp.detach().cpu()
     

@@ -3,7 +3,8 @@ import torch.nn as nn
 import numpy as np
 
 def sample(logits, device, axis=1):
-    return torch.multinomial(logits, num_samples=1)
+    noise = torch.rand(logits.shape).to(device)
+    return torch.argmax(logits - torch.log(-torch.log(noise)), dim=axis)
 
 def fc(ns, nh, init_scale=1.0):
     linear = nn.Linear(ns, nh)

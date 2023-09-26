@@ -100,29 +100,28 @@ class GeneralModel():
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-            print(f'ADV:\n{ADV[0:40]}')
             print('pi:')
-            print(pi[0:40])
+            print(pi[0:50])
             print('A:')
-            print(A[0:40])
+            print(A[0:50])
 
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
-            print(f'logpac: {logpac}')
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
             vf_loss = torch.nn.MSELoss()(vf, R)
-            print(f'vf: {vf[0:40]}')
-            print(f'R: {R[0:40]}')
+            print(f'vf: {vf[0:80]}')
+            print(f'R: {R[0:80]}')
+            print(f'ADV:\n{ADV[0:80]}')
             loss = pg_loss + self.vf_coef * vf_loss
             print('#' * 50)
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
-            torch.nn.utils.clip_grad_norm_(self.train_model[k].parameters(), self.max_grad_norm)
             self.optim[k].zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].parameters(), self.max_grad_norm)
             self.optim[k].step()
             policy_loss.append(pg_loss.clone().detach().cpu().numpy())
             value_loss.append(vf_loss.clone().detach().cpu().numpy())
@@ -144,9 +143,9 @@ class GeneralModel():
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
-            torch.nn.utils.clip_grad_norm_(self.train_model[k].policy_params(), self.max_grad_norm)
             self.clones[k].zero_grad()
             lld.backward()
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].policy_params(), self.max_grad_norm)
             self.clones[k].step()
             lld_loss.append(lld.detach().cpu().numpy())
             
@@ -349,12 +348,16 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     
     if disc_type == 'decentralized':
         discriminator = [
-            Discriminator(ob_space, ac_space, nstack, k, device, disc_type=disc_type).to(device) for k in range(num_agents)
+            Discriminator(ob_space, ac_space, nstack, k, device,
+                          disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay)
+            .to(device) for k in range(num_agents)
         ]
     elif disc_type == 'centralized':
-        discriminator = Discriminator(ob_space, ac_space, nstack, 0, device, disc_type=disc_type).to(device)
+        discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay).to(device)
     elif disc_type == 'single':
-        discriminator = Discriminator(ob_space, ac_space, nstack, 0, device, disc_type=disc_type).to(device)
+        discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay).to(device)
     else:
         assert False
         
