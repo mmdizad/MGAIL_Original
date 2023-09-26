@@ -38,7 +38,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1),
      nprocs=num_cpu, nsteps=timesteps_per_batch // num_cpu, lr=lr, vf_coef=1,
         ent_coef=0.0, dis_lr=dis_lr, disc_type=disc_type, bc_iters=bc_iters,
-        identical=make_env.get_identical(env_id), d_iters=1, weight_decay=5e-4)
+        identical=make_env.get_identical(env_id), d_iters=1, weight_decay=3e-5)
     env.close()
 
 
@@ -51,14 +51,14 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
 @click.option('--ret_threshold', type=click.FLOAT, default=-10)
-@click.option('--dis_lr', type=click.FLOAT, default=3e-4)
+@click.option('--dis_lr', type=click.FLOAT, default=2e-4)
 @click.option('--disc_type', type=click.Choice(['decentralized', 'centralized', 'single']), default='decentralized')
-@click.option('--bc_iters', type=click.INT, default=1e+4)
+@click.option('--bc_iters', type=click.INT, default=5e+3)
 def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, dis_lr, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [3e-4]
+    lrs = [2e-4]
     seeds = [1]
-    batch_sizes = [2000]
+    batch_sizes = [1000]
 
     for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(

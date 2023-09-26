@@ -18,7 +18,7 @@ gast==0.5.4
 glfw==2.6.2
 google-pasta==0.2.0
 grpcio==1.57.0
-gym==0.10.5
+gym[mujoco,atari,classic_control]==0.10.5
 h5py==3.8.0
 idna==3.4
 imageio==2.31.1
@@ -50,6 +50,7 @@ ray==2.6.3
 requests==2.31.0
 scipy==1.7.3
 six==1.16.0
+tensorflow==1.14
 tensorboardX==1.4
 termcolor==2.3.0
 tqdm==4.66.1

@@ -61,7 +61,6 @@ class CategoricalPolicy(nn.Module):
 
     def step(self, ob, obs, a_v):
         pi, v = self.forward(ob, obs, a_v)
-        pi = F.softmax(pi, dim=1)
         a = sample(pi, self.device)
         return a, v[:, 0], [] # dummy state
 
