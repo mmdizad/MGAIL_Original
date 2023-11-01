@@ -7,4 +7,4 @@ originally implemented in TensorFlow version 1. The code in this repository is a
 ## Original TensorFlow Version
 The original TensorFlow version of this implementation can be found in the following repository:
 
-[Link to the Original TensorFlow Repository](https://github.com/ermongroup/multiagent-gail)https://github.com/ermongroup/multiagent-gail
+[Link to the Original TensorFlow Repository](https://github.com/ermongroup/multiagent-gail)
