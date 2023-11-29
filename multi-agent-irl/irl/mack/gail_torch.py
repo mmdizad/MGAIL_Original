@@ -349,15 +349,17 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     if disc_type == 'decentralized':
         discriminator = [
             Discriminator(ob_space, ac_space, nstack, k, device,
-                          disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay)
+                          disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay, learning_rate=dis_lr)
             .to(device) for k in range(num_agents)
         ]
     elif disc_type == 'centralized':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
-                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay).to(device)
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay,
+                                      learning_rate=dis_lr).to(device)
     elif disc_type == 'single':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
-                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay).to(device)
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay,
+                                      learning_rate=dis_lr).to(device)
     else:
         assert False
         

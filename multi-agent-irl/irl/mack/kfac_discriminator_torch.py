@@ -21,6 +21,7 @@ class Discriminator(nn.Module):
         self.all_ob_shape = sum([obs.shape[0] for obs in ob_spaces]) * nstack
         self.all_ac_shape = sum([ac.n for ac in ac_spaces]) * nstack
         self.device = device
+        self.logsigmoid = torch.nn.LogSigmoid()
                 
         if disc_type == 'decentralized':
             self.disc = self.build_graph(input_shape=self.ob_shape + self.ac_shape, output_shape=self.num_outputs)
@@ -51,10 +52,12 @@ class Discriminator(nn.Module):
         return score
     
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
-        loss_pi, loss_exp = self.calculate_loss(ob_pi, act_pi, ob_exp, act_exp)
+        loss_pi, loss_exp, back_loss = self.calculate_loss(ob_pi, act_pi, ob_exp, act_exp)
         loss = loss_pi + loss_exp
+        print(f'additive loss: {loss}')
+        print(f'original loss: {back_loss}')
         self.optimizer.zero_grad()
-        loss.backward()
+        back_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
         self.optimizer.step()
         return loss_pi.detach().cpu(), loss_exp.detach().cpu()
@@ -64,18 +67,23 @@ class Discriminator(nn.Module):
         logits_exp = self.forward(ob_exp, act_exp)
         labels_pi = torch.zeros((ob_pi.shape[0], 1), device=self.device)
         labels_exp = torch.ones((ob_exp.shape[0], 1), device=self.device)
+        print(f"logits_pi: {logits_pi.shape}")
+        print(f"logits_exp: {logits_exp.shape}")
+        logits = torch.cat([logits_pi, logits_exp], dim=0)
+        print(f"logits: {logits.shape}")
+        print(f"labels_pi: {labels_pi.shape}")
+        print(f"labels_exp: {labels_exp.shape}")
+        labels = torch.cat([labels_pi, labels_exp], dim=0)
+        print(f"labels: {labels.shape}")
         loss_pi = F.binary_cross_entropy_with_logits(logits_pi, labels_pi)
         loss_exp = F.binary_cross_entropy_with_logits(logits_exp, labels_exp)
-
-        #  maximize E_{\pi} log(D) + E_{exp} log(-D)
-        # loss_pi = torch.mean(-F.logsigmoid(logits_pi))
-        # loss_exp = torch.mean(-F.logsigmoid(-logits_exp))
+        loss = F.binary_cross_entropy_with_logits(logits, labels)
         
-        return loss_pi, loss_exp
+        return loss_pi, loss_exp, loss
     
     def get_reward(self, ob, act):
         score = self.forward(ob, act)
-        reward = torch.nn.LogSigmoid()(score)
+        reward = self.logsigmoid(score)
         return reward.detach().cpu().numpy()
     
     def save(self, save_path='disc_model_weights.pth'):
