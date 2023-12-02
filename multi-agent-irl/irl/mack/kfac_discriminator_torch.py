@@ -9,7 +9,7 @@ disc_types = ['decentralized', 'centralized', 'single']
 class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
-                 learning_rate=0.01, total_steps=50000, max_grad_norm=0.5, weight_decay=1e-4):
+                 learning_rate=0.01, max_grad_norm=0.5, weight_decay=1e-4):
         super(Discriminator, self).__init__()
         self.max_grad_norm = max_grad_norm
         self.hidden_size = hidden_size        
@@ -46,8 +46,8 @@ class Discriminator(nn.Module):
     
     
     def forward(self, ob, act):
-        ob, act = torch.tensor(ob, dtype=torch.float32).to(self.device),\
-            torch.tensor(act, dtype=torch.float32).to(self.device)
+        ob, act = torch.tensor(ob, dtype=torch.float32, requires_grad=True).to(self.device),\
+            torch.tensor(act, dtype=torch.float32, requires_grad=True).to(self.device)
         score = self.disc(torch.cat([ob, act], dim=1))
         return score
     

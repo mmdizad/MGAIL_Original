@@ -17,7 +17,8 @@ from irl.mack.gail_torch import learn
 from sandbox.mack.policies_torch import CategoricalPolicy
 
 def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu, expert_path,
-          traj_limitation, ret_threshold, dis_lr, disc_type='decentralized', bc_iters=500, weight_decay=1e-4, d_iters=1):
+          traj_limitation, ret_threshold, dis_lr, disc_type='decentralized', bc_iters=500, weight_decay=1e-4,
+          d_iters=1, ent_coef=0.005):
     def create_env(rank):
         def _thunk():
             env = make_env.make_env(env_id)
@@ -37,7 +38,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     expert = MADataSet(expert_path, ret_threshold=ret_threshold, traj_limitation=traj_limitation)
     learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1),
      nprocs=num_cpu, nsteps=timesteps_per_batch // num_cpu, lr=lr, vf_coef=1,
-        ent_coef=0.0, dis_lr=dis_lr, disc_type=disc_type, bc_iters=bc_iters,
+        ent_coef=ent_coef, dis_lr=dis_lr, disc_type=disc_type, bc_iters=bc_iters,
         identical=make_env.get_identical(env_id), d_iters=d_iters, weight_decay=weight_decay)
     env.close()
 
@@ -56,20 +57,22 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--bc_iters', type=click.INT, default=500)
 def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, dis_lr, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [1e-4]
-    dis_lr = 1e-4
+    lrs = [1e-4, 1e-5]
+    dis_lr = [1e-4, 1e-5]
     seeds = [1]
     batch_sizes = [1000]
     weight_decay = 1e-4
     bc_iters = 500
     d_iters = 1
+    num_timesteps = 5e7
+    ent_coef = 0.005
 
-    for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
+    for env_id, seed, lr, dis_lr,batch_size in itertools.product(env_ids, seeds, lrs, dis_lr, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(
               traj_limitation, lr, batch_size, dis_lr, bc_iters, seed),
-              env_id, 5e7, lr, batch_size, seed, batch_size // 250, expert_path,
+              env_id, num_timesteps, lr, batch_size, seed, batch_size // 250, expert_path,
               traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters, 
-              weight_decay=weight_decay, d_iters=d_iters)
+              weight_decay=weight_decay, d_iters=d_iters, ent_coef=ent_coef)
 
 
 if __name__ == "__main__":

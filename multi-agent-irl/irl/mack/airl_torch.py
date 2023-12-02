@@ -471,7 +471,7 @@ class Runner(object):
 def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.99, lam=0.95, log_interval=1, nprocs=32,
           nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
-          bc_iters=500, identical=None, l2=0.1, d_iters=1, rew_scale=0.1, weight_decay=1e-4):
+          bc_iters=500, identical=None, d_iters=1, rew_scale=0.1, weight_decay=1e-4):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
     buffer = None
@@ -493,12 +493,13 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     model = make_model()
     
     if disc_type == 'decentralized' or disc_type == 'decentralized-all':
-        # discriminator = [
-        #     Discriminator(ob_space, ac_space,
-        #                   state_only=True, discount=gamma, nstack=nstack, index=k, disc_type=disc_type,
-        #                   total_steps=total_timesteps // (nprocs * nsteps),
-        #                   lr_rate=dis_lr, l2_loss_ratio=l2, weight_decay=weight_decay) for k in range(num_agents)
-        # ]
+        print(f'dis lr: {dis_lr}')
+        discriminator = [
+            Discriminator(ob_space, ac_space,
+                          state_only=True, discount=gamma, nstack=nstack, index=k, device=device, disc_type=disc_type,
+                          total_steps=total_timesteps // (nprocs * nsteps),
+                          lr_rate=dis_lr, weight_decay=weight_decay) for k in range(num_agents)
+        ]
     else:
         assert False
 
@@ -651,6 +652,4 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                     discriminator[k].save(savepath)
             else:
                 assert False
-    coord.request_stop()
-    # coord.join(enqueue_threads)
     env.close()

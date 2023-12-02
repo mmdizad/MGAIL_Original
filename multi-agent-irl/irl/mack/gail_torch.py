@@ -18,7 +18,7 @@ from scipy.stats import pearsonr, spearmanr
 class GeneralModel():
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=2, nsteps=200,
                  nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
-                kfac_clip=0.001, lrschedule='linear', identical=None, weight_decay=0):
+                kfac_clip=0.001, lrschedule='linear', identical=None, weight_decay=1e-4):
                 
         self.vf_coef = vf_coef
         self.ent_coef = ent_coef
@@ -95,15 +95,15 @@ class GeneralModel():
                 A_v = action_v
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
             X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
-            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
-            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
+            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-            print('pi:')
-            print(pi[0:50])
-            print('A:')
-            print(A[0:50])
+            # print('pi:')
+            # print(pi[0:50])
+            # print('A:')
+            # print(A[0:50])
 
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
             entropy = torch.mean(cat_entropy(pi))
@@ -111,11 +111,11 @@ class GeneralModel():
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
             vf_loss = torch.nn.MSELoss()(vf, R)
-            print(f'vf: {vf[0:80]}')
-            print(f'R: {R[0:80]}')
-            print(f'ADV:\n{ADV[0:80]}')
+            # print(f'vf: {vf[0:80]}')
+            # print(f'R: {R[0:80]}')
+            # print(f'ADV:\n{ADV[0:80]}')
             loss = pg_loss + self.vf_coef * vf_loss
-            print('#' * 50)
+            # print('#' * 50)
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
@@ -136,7 +136,7 @@ class GeneralModel():
                 continue
 
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
             pi = self.train_model[k].compute_pi(X)
             logpac = torch.nn.CrossEntropyLoss()(pi, A)
             lld = torch.mean(logpac)

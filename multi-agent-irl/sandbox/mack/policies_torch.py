@@ -35,16 +35,16 @@ class CategoricalPolicy(nn.Module):
         return pi, vf
 
     def compute_pi(self, ob):
-        ob = torch.tensor(ob, dtype=torch.float32).to(self.device)
+        ob = torch.tensor(ob, dtype=torch.float32, requires_grad=True).to(self.device)
         h1 = F.relu(self.fc1(ob))
         h2 = F.relu(self.fc2(h1))
         pi = self.pi_f(h2)
         return pi
     
     def compute_vf(self, obs, a_v):
-        obs = torch.tensor(obs, dtype=torch.float32).to(self.device)
+        obs = torch.tensor(obs, dtype=torch.float32, requires_grad=True).to(self.device)
         if a_v is not None:
-            a_v = torch.tensor(a_v, dtype=torch.float32).to(self.device)
+            a_v = torch.tensor(a_v, dtype=torch.float32, requires_grad=True).to(self.device)
             Y = torch.cat([obs, a_v], dim=1)
         else:
             Y = obs

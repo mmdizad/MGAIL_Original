@@ -20,7 +20,7 @@ from sandbox.mack.policies_torch import CategoricalPolicy
 
 
 def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu, expert_path,
-          traj_limitation, ret_threshold, dis_lr, disc_type='decentralized', bc_iters=500, l2=0.1, d_iters=1,
+          traj_limitation, ret_threshold, dis_lr, disc_type='decentralized', bc_iters=500, d_iters=1,
           rew_scale=0.1, weight_decay=1e-4):
     def create_env(rank):
         def _thunk():
@@ -41,7 +41,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     expert = MADataSet(expert_path, ret_threshold=ret_threshold, traj_limitation=traj_limitation, nobs_flag=True)
     learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1), nprocs=num_cpu,
           nsteps=timesteps_per_batch // num_cpu, lr=lr, ent_coef=0.0, dis_lr=dis_lr,
-          disc_type=disc_type, bc_iters=bc_iters, identical=make_env.get_identical(env_id), l2=l2, d_iters=d_iters,
+          disc_type=disc_type, bc_iters=bc_iters, identical=make_env.get_identical(env_id), d_iters=d_iters,
           rew_scale=rew_scale, weight_decay=weight_decay)
     env.close()
 
@@ -76,7 +76,7 @@ def main(logdir, env, expert_path, seed, traj_limitation, ret_threshold, dis_lr,
         train(logdir + '/airl/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}-l2-{}-iter-{}-r-{}/seed-{}'.format(
               traj_limitation, lr, batch_size, dis_lr, bc_iters, l2, d_iters, rew_scale, seed),
               env_id, 5e7, lr, batch_size, seed, batch_size // 250, expert_path,
-              traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters, l2=l2, d_iters=d_iters,
+              traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters, d_iters=d_iters,
               rew_scale=rew_scale, weight_decay=weight_decay)
 
 
