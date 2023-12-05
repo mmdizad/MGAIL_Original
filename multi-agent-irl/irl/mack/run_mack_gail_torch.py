@@ -68,8 +68,8 @@ def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, 
     ent_coef = 0.005
 
     for env_id, seed, lr, dis_lr, batch_size, weight_decay in itertools.product(env_ids, seeds, lrs, dis_lrs, batch_sizes, weight_decays):
-        train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(
-              traj_limitation, lr, batch_size, dis_lr, bc_iters, seed),
+        train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}-w-{}/seed-{}'.format(
+              traj_limitation, lr, batch_size, dis_lr, bc_iters, seed, weight_decay),
               env_id, num_timesteps, lr, batch_size, seed, batch_size // 250, expert_path,
               traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters, 
               weight_decay=weight_decay, d_iters=d_iters, ent_coef=ent_coef)
