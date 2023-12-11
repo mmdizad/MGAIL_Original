@@ -24,7 +24,6 @@ class GeneralModel():
         self.ent_coef = ent_coef
         self.device = device
         self.max_grad_norm = max_grad_norm
-        nbatch = nenvs * nsteps
         self.num_agents = num_agents = len(ob_space)
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
         self.identical = identical
@@ -110,7 +109,7 @@ class GeneralModel():
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
-            vf_loss = torch.nn.MSELoss()(vf, R)
+            vf_loss = torch.mean(torch.nn.MSELoss()(vf, R))
             # print(f'vf: {vf[0:80]}')
             # print(f'R: {R[0:80]}')
             # print(f'ADV:\n{ADV[0:80]}')

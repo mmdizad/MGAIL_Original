@@ -57,7 +57,7 @@ class CategoricalPolicy(nn.Module):
     def step_log_prob(self, ob, acts):
         pi = self.compute_pi(ob)
         loss = -1 * nn.CrossEntropyLoss()(pi, acts)
-        return loss
+        return loss.reshape((-1, 1))
 
     def step(self, ob, obs, a_v):
         pi, v = self.forward(ob, obs, a_v)

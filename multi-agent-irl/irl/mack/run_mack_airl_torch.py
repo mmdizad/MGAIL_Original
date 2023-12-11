@@ -6,6 +6,7 @@ import click
 import gym
 import sys
 relative_path = sys.path[0]
+
 relative_path = relative_path.replace('multi-agent-irl', 'multi-agent-particle-envs')
 sys.path.append(relative_path)
 

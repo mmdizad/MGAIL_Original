@@ -15,283 +15,238 @@ from rl.common.torch_util import explained_variance, set_global_seeds
 from scipy.stats import pearsonr, spearmanr
 
 
-class Model(object):
-    def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=2, nsteps=200,
+class GeneralModel(object):
+    def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=2, nsteps=200,
                  nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
-                 kfac_clip=0.001, lrschedule='linear', identical=None):
-        config = tf.ConfigProto(allow_soft_placement=True,
-                                intra_op_parallelism_threads=nprocs,
-                                inter_op_parallelism_threads=nprocs)
-        config.gpu_options.allow_growth = True
-        self.sess = sess = tf.Session(config=config)
-        nbatch = nenvs * nsteps
+                 kfac_clip=0.001, lrschedule='linear', identical=None, weight_decay=1e-4):
+        
+        self.vf_coef = vf_coef
+        self.ent_coef = ent_coef
+        self.device = device
+        self.max_grad_norm = max_grad_norm
         self.num_agents = num_agents = len(ob_space)
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
-        if identical is None:
-            identical = [False for _ in range(self.num_agents)]
+        self.identical = identical
+        if self.identical is None:
+            self.identical = [False for _ in range(self.num_agents)]
+            
+        self.scale = [1 for _ in range(num_agents)]
+        self.pointer = [i for i in range(num_agents)]
 
-        scale = [1 for _ in range(num_agents)]
-        pointer = [i for i in range(num_agents)]
         h = 0
         for k in range(num_agents):
             if identical[k]:
-                scale[h] += 1
+                self.scale[h] += 1
             else:
-                pointer[h] = k
+                self.pointer[h] = k
                 h = k
-        pointer[h] = num_agents
+        self.pointer[h] = num_agents
+        
+        
+        self.step_model = []
+        self.train_model = []
 
-        A, ADV, R, PG_LR = [], [], [], []
+        # A, ADV, R, PG_LR = [], [], [], []
+        # for k in range(num_agents):
+        #     if identical[k]:
+        #         A.append(A[-1])
+        #         ADV.append(ADV[-1])
+        #         R.append(R[-1])
+        #         PG_LR.append(PG_LR[-1])
+        #     else:
+        #         A.append(tf.placeholder(tf.int32, [nbatch * scale[k]]))
+        #         ADV.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
+        #         R.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
+        #         PG_LR.append(tf.placeholder(tf.float32, []))
+
+        # pg_loss, entropy, vf_loss, train_loss = [], [], [], []
+        # self.model = step_model = []
+        # self.model2 = train_model = []
+        # self.pg_fisher = pg_fisher_loss = []
+        # self.logits = logits = []
+        # sample_net = []
+        # self.vf_fisher = vf_fisher_loss = []
+        # self.joint_fisher = joint_fisher_loss = []
+        # self.lld = lld = []
+        # self.log_pac = []
+
+        self.step_model = []
+        self.train_model = []
+        
         for k in range(num_agents):
             if identical[k]:
-                A.append(A[-1])
-                ADV.append(ADV[-1])
-                R.append(R[-1])
-                PG_LR.append(PG_LR[-1])
-            else:
-                A.append(tf.placeholder(tf.int32, [nbatch * scale[k]]))
-                ADV.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
-                R.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
-                PG_LR.append(tf.placeholder(tf.float32, []))
-
-        pg_loss, entropy, vf_loss, train_loss = [], [], [], []
-        self.model = step_model = []
-        self.model2 = train_model = []
-        self.pg_fisher = pg_fisher_loss = []
-        self.logits = logits = []
-        sample_net = []
-        self.vf_fisher = vf_fisher_loss = []
-        self.joint_fisher = joint_fisher_loss = []
-        self.lld = lld = []
-        self.log_pac = []
-
-        for k in range(num_agents):
-            if identical[k]:
-                step_model.append(step_model[-1])
-                train_model.append(train_model[-1])
-            else:
-                step_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
-                                         nenvs, 1, nstack, reuse=False, name='%d' % k))
-                train_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
-                                          nenvs * scale[k], nsteps, nstack, reuse=True, name='%d' % k))
-            logpac = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=train_model[k].pi, labels=A[k])
-            self.log_pac.append(-logpac)
-
-            lld.append(tf.reduce_mean(logpac))
-            logits.append(train_model[k].pi)
-
-            pg_loss.append(tf.reduce_mean(ADV[k] * logpac))
-            entropy.append(tf.reduce_mean(cat_entropy(train_model[k].pi)))
-            pg_loss[k] = pg_loss[k] - ent_coef * entropy[k]
-            vf_loss.append(tf.reduce_mean(mse(tf.squeeze(train_model[k].vf), R[k])))
-            train_loss.append(pg_loss[k] + vf_coef * vf_loss[k])
-
-            pg_fisher_loss.append(-tf.reduce_mean(logpac))
-            sample_net.append(train_model[k].vf + tf.random_normal(tf.shape(train_model[k].vf)))
-            vf_fisher_loss.append(-vf_fisher_coef * tf.reduce_mean(
-                tf.pow(train_model[k].vf - tf.stop_gradient(sample_net[k]), 2)))
-            joint_fisher_loss.append(pg_fisher_loss[k] + vf_fisher_loss[k])
-
-        self.policy_params = []
-        self.value_params = []
-
-        for k in range(num_agents):
-            if identical[k]:
-                self.policy_params.append(self.policy_params[-1])
-                self.value_params.append(self.value_params[-1])
-            else:
-                self.policy_params.append(find_trainable_variables("policy_%d" % k))
-                self.value_params.append(find_trainable_variables("value_%d" % k))
-        self.params = params = [a + b for a, b in zip(self.policy_params, self.value_params)]
-        params_flat = []
-        for k in range(num_agents):
-            params_flat.extend(params[k])
-
-        self.grads_check = grads = [
-            tf.gradients(train_loss[k], params[k]) for k in range(num_agents)
-        ]
-        clone_grads = [
-            tf.gradients(lld[k], params[k]) for k in range(num_agents)
-        ]
+                self.step_model.append(self.step_model[-1])
+                self.train_model.append(self.train_model[-1])
+            else:      
+                self.step_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
+                                         nstack, self.device).to(self.device))
+                self.train_model.append(self.step_model[-1])
 
         self.optim = optim = []
         self.clones = clones = []
-        update_stats_op = []
-        train_op, clone_op, q_runner = [], [], []
-
+        # optimizers
         for k in range(num_agents):
-            if identical[k]:
-                optim.append(optim[-1])
-                train_op.append(train_op[-1])
-                q_runner.append(q_runner[-1])
-                clones.append(clones[-1])
-                clone_op.append(clone_op[-1])
+            if self.identical[k]:
+                self.optim.append(self.optim[-1])
+                self.clones.append(self.clones[-1])
             else:
-                with tf.variable_scope('optim_%d' % k):
-                    optim.append(kfac.KfacOptimizer(
-                        learning_rate=PG_LR[k], clip_kl=kfac_clip,
-                        momentum=0.9, kfac_update=1, epsilon=0.01,
-                        stats_decay=0.99, async=0, cold_iter=10,
-                        max_grad_norm=max_grad_norm)
-                    )
-                    update_stats_op.append(optim[k].compute_and_apply_stats(joint_fisher_loss, var_list=params[k]))
-                    train_op_, q_runner_ = optim[k].apply_gradients(list(zip(grads[k], params[k])))
-                    train_op.append(train_op_)
-                    q_runner.append(q_runner_)
+                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=weight_decay))
+                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=weight_decay))
 
-                with tf.variable_scope('clone_%d' % k):
-                    clones.append(kfac.KfacOptimizer(
-                        learning_rate=PG_LR[k], clip_kl=kfac_clip,
-                        momentum=0.9, kfac_update=1, epsilon=0.01,
-                        stats_decay=0.99, async=0, cold_iter=10,
-                        max_grad_norm=max_grad_norm)
-                    )
-                    update_stats_op.append(clones[k].compute_and_apply_stats(
-                        pg_fisher_loss[k], var_list=self.policy_params[k]))
-                    clone_op_, q_runner_ = clones[k].apply_gradients(list(zip(clone_grads[k], self.policy_params[k])))
-                    clone_op.append(clone_op_)
-
-        update_stats_op = tf.group(*update_stats_op)
-        train_ops = train_op
-        clone_ops = clone_op
-        train_op = tf.group(*train_op)
-        clone_op = tf.group(*clone_op)
-
-        self.q_runner = q_runner
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
+        self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
 
-        def train(obs, states, rewards, masks, actions, values):
-            advs = [rewards[k] - values[k] for k in range(num_agents)]
-            for step in range(len(obs)):
-                cur_lr = self.lr.value()
-
-            ob = np.concatenate(obs, axis=1)
-
-            td_map = {}
-            for k in range(num_agents):
-                if identical[k]:
-                    continue
-                new_map = {}
-                if num_agents > 1:
-                    action_v = []
-                    for j in range(k, pointer[k]):
+    def train(self, obs, states, rewards, masks, actions, values):
+        advs = [rewards[k] - values[k] for k in range(self.num_agents)]
+        for step in range(len(obs)):
+            cur_lr = self.lr.value()
+    
+        ob = np.concatenate(obs, axis=1)
+            
+        policy_loss = []
+        value_loss = []
+        policy_entropy = []
+        for k in range(self.num_agents):
+            if self.identical[k]:
+                policy_loss.append(policy_loss[-1])
+                value_loss.append(value_loss[-1])
+                policy_entropy.append(policy_entropy[-1])
+                continue
+            A_v = None
+                
+            if self.num_agents > 1:
+                action_v = []
+                for _ in range(k, self.pointer[k]):
                         action_v.append(np.concatenate([multionehot(actions[i], self.n_actions[i])
-                                                   for i in range(num_agents) if i != k], axis=1))
-                    action_v = np.concatenate(action_v, axis=0)
-                    new_map.update({train_model[k].A_v: action_v})
-                    td_map.update({train_model[k].A_v: action_v})
+                                                       for i in range(self.num_agents) if i != k], axis=1))
+                action_v = np.concatenate(action_v, axis=0)
+                A_v = action_v
+            
+            X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
+            X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
+            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
+            # calculations
+            pi, vf = self.train_model[k](X, X_v, A_v)
+    
+            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            entropy = torch.mean(cat_entropy(pi))
+            pg_loss = torch.mean(ADV * logpac)
+            pg_loss = pg_loss - self.ent_coef * entropy
+            vf = torch.squeeze(vf)
+            vf_loss = torch.mean(torch.nn.MSELoss()(vf, R))
+            # print(f'vf: {vf[0:80]}')
+            # print(f'R: {R[0:80]}')
+            # print(f'ADV:\n{ADV[0:80]}')
+            loss = pg_loss + self.vf_coef * vf_loss
+            # print('#' * 50)
+            for g in self.optim[k].param_groups:
+                g['lr'] = cur_lr / float(self.scale[k])
+    
+            self.optim[k].zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].parameters(), self.max_grad_norm)
+            self.optim[k].step()
+            policy_loss.append(pg_loss.clone().detach().cpu().numpy())
+            value_loss.append(vf_loss.clone().detach().cpu().numpy())
+            policy_entropy.append(entropy.clone().detach().cpu().numpy())
+        return policy_loss, value_loss, policy_entropy
+    
+    def clone(self, obs, actions):
+        cur_lr = self.clone_lr.value()
+        lld_loss = []
+        for k in range(self.num_agents):
+            if self.identical[k]:
+                continue
 
-                new_map.update({
-                    train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
-                    train_model[k].X_v: np.concatenate([ob.copy() for j in range(k, pointer[k])], axis=0),
-                    A[k]: np.concatenate([actions[j] for j in range(k, pointer[k])], axis=0),
-                    ADV[k]: np.concatenate([advs[j] for j in range(k, pointer[k])], axis=0),
-                    R[k]: np.concatenate([rewards[j] for j in range(k, pointer[k])], axis=0),
-                    PG_LR[k]: cur_lr / float(scale[k])
-                })
-                sess.run(train_ops[k], feed_dict=new_map)
-                td_map.update(new_map)
+            X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            pi = self.train_model[k].compute_pi(X)
+            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            lld = torch.mean(logpac)
+            for g in self.clones[k].param_groups:
+                g['lr'] = cur_lr / float(self.scale[k])
 
-                if states[k] != []:
-                    td_map[train_model[k].S] = states
-                    td_map[train_model[k].M] = masks
+            self.clones[k].zero_grad()
+            lld.backward()
+            torch.nn.utils.clip_grad_norm_(self.train_model[k].policy_params(), self.max_grad_norm)
+            self.clones[k].step()
+            lld_loss.append(lld.detach().cpu().numpy())
+            
+        return lld_loss
 
-            policy_loss, value_loss, policy_entropy = sess.run(
-                [pg_loss, vf_loss, entropy],
-                td_map
-            )
-            return policy_loss, value_loss, policy_entropy
+    def get_log_action_prob(self, obs, actions):
+        action_prob = []
+        for k in range(self.num_agents):
+            if self.identical[k]:
+                continue
+            X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            pi = self.train_model[k].compute_pi(X)
+            log_pac = torch.nn.CrossEntropyLoss()(pi, A)
+            if self.scale[k] == 1:
+                action_prob.append(log_pac)
+            else:
+                log_pac = np.split(log_pac, self.scale[k], axis=0)
+                action_prob += log_pac
+        return action_prob
 
-        def clone(obs, actions):
-            td_map = {}
-            cur_lr = self.clone_lr.value()
-            for k in range(num_agents):
-                if identical[k]:
-                    continue
-                new_map = {}
-                new_map.update({
-                    train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
-                    A[k]: np.concatenate([actions[j] for j in range(k, pointer[k])], axis=0),
-                    PG_LR[k]: cur_lr / float(scale[k])
-                })
-                sess.run(clone_ops[k], feed_dict=new_map)
-                td_map.update(new_map)
-            lld_loss = sess.run([lld], td_map)
-            return lld_loss
+    def get_log_action_prob_step(self, obs, actions):
+        action_prob = []
+        for k in range(self.num_agents):
+            action_prob.append(self.step_model[k].step_log_prob(obs[k], actions[k]))
+        return action_prob
 
-        def get_log_action_prob(obs, actions):
-            action_prob = []
-            for k in range(num_agents):
-                if identical[k]:
-                    continue
-                new_map = {
-                    train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
-                    A[k]: np.concatenate([actions[j] for j in range(k, pointer[k])], axis=0)
-                }
-                log_pac = sess.run(self.log_pac[k], feed_dict=new_map)
-                if scale[k] == 1:
-                    action_prob.append(log_pac)
-                else:
-                    log_pac = np.split(log_pac, scale[k], axis=0)
-                    action_prob += log_pac
-            return action_prob
+    def save(self, save_path):
+        models_dict = {}
+        for k in range(self.num_agents):
+            key1 = f'train_model{k+1}'
+            models_dict[key1] = self.train_model[k].state_dict()
+        torch.save(models_dict, save_path)
 
-        self.get_log_action_prob = get_log_action_prob
+    def load(self, load_path):
+        models_dict = torch.load(load_path)
+        for k in range(self.num_agents):
+            key1 = f'train_model{k+1}'
+            self.train_model[k].load_state_dict(models_dict[key1])
+            self.step_model[k] = self.train_model[k]
+        
+    def step(self, ob, av):
+        a, v, s = [], [], []
+        obs = np.concatenate(ob, axis=1)
+        for k in range(self.num_agents):
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
+            a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a.append(a_.detach().cpu().numpy())
+            v.append(v_.detach().cpu().numpy())
+            s.append(s_)
+        return a, v, s
 
-        def get_log_action_prob_step(obs, actions):
-            action_prob = []
-            for k in range(num_agents):
-                action_prob.append(step_model[k].step_log_prob(obs[k], actions[k]))
-            return action_prob
-
-        self.get_log_action_prob_step = get_log_action_prob_step
-
-        def save(save_path):
-            ps = sess.run(params_flat)
-            joblib.dump(ps, save_path)
-
-        def load(load_path):
-            loaded_params = joblib.load(load_path)
-            restores = []
-            for p, loaded_p in zip(params_flat, loaded_params):
-                restores.append(p.assign(loaded_p))
-            sess.run(restores)
-
-        self.train = train
-        self.clone = clone
-        self.save = save
-        self.load = load
-        self.train_model = train_model
-        self.step_model = step_model
-
-        def step(ob, av, *_args, **_kwargs):
-            a, v, s = [], [], []
-            obs = np.concatenate(ob, axis=1)
-            for k in range(num_agents):
-                a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
-                                      for i in range(num_agents) if i != k], axis=1)
-                a_, v_, s_ = step_model[k].step(ob[k], obs, a_v)
-                a.append(a_)
-                v.append(v_)
-                s.append(s_)
-            return a, v, s
-
-        self.step = step
-
-        def value(obs, av):
-            v = []
-            ob = np.concatenate(obs, axis=1)
-            for k in range(num_agents):
-                a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
-                                      for i in range(num_agents) if i != k], axis=1)
-                v_ = step_model[k].value(ob, a_v)
-                v.append(v_)
-            return v
-
-        self.value = value
-        self.initial_state = [step_model[k].initial_state for k in range(num_agents)]
+    def best_step(self, ob, av):
+        a, v, s = [], [], []
+        obs = np.concatenate(ob, axis=1)
+        for k in range(self.num_agents):
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
+            a_, v_, s_ = self.step_model[k].best_step(ob[k], obs, a_v)
+            a.append(a_.detach().cpu().numpy())
+            v.append(v_.detach().cpu().numpy())
+            s.append(s_)
+        return a, v, s
+             
+    def value(self, obs, av):
+        v = []
+        ob = np.concatenate(obs, axis=1)
+        for k in range(self.num_agents):
+            a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
+                                  for i in range(self.num_agents) if i != k], axis=1)
+            with torch.no_grad():
+                v_ = self.step_model[k].value(ob, a_v)
+            v.append(v_.detach().cpu().numpy())
+        return v
 
 
 class Runner(object):
@@ -481,10 +436,10 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     ob_space = env.observation_space
     ac_space = env.action_space
     num_agents = (len(ob_space))
-    # make_model = lambda: Model(policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=nprocs, nsteps=nsteps,
-    #                            nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=vf_fisher_coef,
-    #                            lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
-    #                            lrschedule=lrschedule, identical=identical)
+    make_model = lambda: GeneralModel(policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=nprocs, nsteps=nsteps,
+                               nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=vf_fisher_coef,
+                               lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
+                               lrschedule=lrschedule, identical=identical)
     
     if save_interval and logger.get_dir():
         import cloudpickle
@@ -504,22 +459,21 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
         assert False
 
     # add reward regularization
-    if env_id == 'simple_tag':
-        reward_reg_loss = torch.mean(
-            torch.square(discriminator[0].reward + discriminator[3].reward) +
-            torch.square(discriminator[1].reward + discriminator[3].reward) +
-            torch.square(discriminator[2].reward + discriminator[3].reward)
-        ) + rew_scale * torch.mean(
-            torch.maximum(0.0, 1 - discriminator[0].reward) +
-            torch.maximum(0.0, 1 - discriminator[1].reward) +
-            torch.maximum(0.0, 1 - discriminator[2].reward) +
-            torch.maximum(0.0, discriminator[3].reward + 1)
-        )
-        reward_reg_lr = tf.placeholder(tf.float32, ())
-        reward_reg_optim = tf.train.AdamOptimizer(learning_rate=reward_reg_lr)
-        reward_reg_train_op = reward_reg_optim.minimize(reward_reg_loss)
+    # if env_id == 'simple_tag':
+    #     reward_reg_loss = torch.mean(
+    #         torch.square(discriminator[0].reward + discriminator[3].reward) +
+    #         torch.square(discriminator[1].reward + discriminator[3].reward) +
+    #         torch.square(discriminator[2].reward + discriminator[3].reward)
+    #     ) + rew_scale * torch.mean(
+    #         torch.maximum(0.0, 1 - discriminator[0].reward) +
+    #         torch.maximum(0.0, 1 - discriminator[1].reward) +
+    #         torch.maximum(0.0, 1 - discriminator[2].reward) +
+    #         torch.maximum(0.0, discriminator[3].reward + 1)
+    #     )
+    #     reward_reg_lr = tf.placeholder(tf.float32, ())
+    #     reward_reg_optim = tf.train.AdamOptimizer(learning_rate=reward_reg_lr)
+    #     reward_reg_train_op = reward_reg_optim.minimize(reward_reg_loss)
 
-    tf.global_variables_initializer().run(session=model.sess)
     runner = Runner(env, model, discriminator, nsteps=nsteps, nstack=nstack, gamma=gamma, lam=lam, disc_type=disc_type,
                     nobs_flag=True)
     nbatch = nenvs * nsteps
@@ -597,17 +551,18 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             else:
                 assert False
 
-            if env_id == 'simple_tag':
-                if disc_type == 'decentralized':
-                    feed_dict = {discriminator[k].obs: np.concatenate([g_obs[k], e_obs[k]], axis=0)
-                                 for k in range(num_agents)}
-                elif disc_type == 'decentralized-all':
-                    feed_dict = {discriminator[k].obs: np.concatenate([g_obs_all, e_obs_all], axis=0)
-                                 for k in range(num_agents)}
-                else:
-                    assert False
-                feed_dict[reward_reg_lr] = discriminator[0].lr.value()
-                model.sess.run(reward_reg_train_op, feed_dict=feed_dict)
+            # if env_id == 'simple_tag':
+            #     if disc_type == 'decentralized':
+            #         feed_dict = {discriminator[k].obs: np.concatenate([g_obs[k], e_obs[k]], axis=0)
+            #                      for k in range(num_agents)}
+            #     elif disc_type == 'decentralized-all':
+            #         feed_dict = {discriminator[k].obs: np.concatenate([g_obs_all, e_obs_all], axis=0)
+            #                      for k in range(num_agents)}
+            #     else:
+            #         assert False
+            #     feed_dict[reward_reg_lr] = discriminator[0].lr.value()
+            #     ## TODO
+            #     model.sess.run(reward_reg_train_op, feed_dict=feed_dict)
 
             idx += 1
 
