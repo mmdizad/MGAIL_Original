@@ -13,7 +13,7 @@ sys.path.append(relative_path)
 import make_env
 from rl import bench
 from rl import logger
-from rl.common import set_global_seeds
+from rl.common.torch_util import set_global_seeds
 from rl.common.vec_env.subproc_vec_env import SubprocVecEnv
 from irl.dataset import MADataSet
 from irl.mack.airl_torch import learn
@@ -48,10 +48,10 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 
 
 @click.command()
-@click.option('--logdir', type=click.STRING, default='/atlas/u/lantaoyu/exps')
+@click.option('--logdir', type=click.STRING, default='./atlas/tmp')
 @click.option('--env', type=click.STRING, default='simple_spread')
 @click.option('--expert_path', type=click.STRING,
-              default='/atlas/u/lantaoyu/projects/MA-AIRL/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint20000-1000tra.pkl')
+    default='./atlas/model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint50000-50000tra.pkl')
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
 @click.option('--ret_threshold', type=click.FLOAT, default=-10)

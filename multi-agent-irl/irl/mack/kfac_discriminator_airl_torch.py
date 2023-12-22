@@ -8,11 +8,12 @@ from rl.acktr.utils_torch import Scheduler
 
 disc_types = ['decentralized', 'decentralized-all']
 
-class Discriminator(object):
+class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces, state_only, discount,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
                  lr_rate=0.01, total_steps=50000, kfac_clip=0.001, max_grad_norm=0.5,
                  weight_decay=1e-4):
+        super(Discriminator, self).__init__()
         self.lr = Scheduler(v=lr_rate, nvalues=total_steps, schedule='linear')
         self.disc_type = disc_type
         if disc_type not in disc_types:
@@ -58,28 +59,29 @@ class Discriminator(object):
             input_d = self.obs_d, self.act_d
             
         
-        self.reward_fn = self.relu_net(input_d, dout=1)
+        self.reward_fn = self.relu_net(input_d, dout=1).to(device)
         # self.reward = self.tanh_net(rew_input, dout=1)
     
-        self.value_fn_n = self.relu_net(self.nobs, dout=1)
+        self.value_fn_n = self.relu_net(self.nobs_d, dout=1).to(device)
         # self.value_fn_n = self.tanh_net(self.nobs, dout=1)
     
-        self.value_fn = self.relu_net(self.obs, dout=1)
+        self.value_fn = self.relu_net(self.obs_d, dout=1).to(device)
         # self.value_fn = self.tanh_net(self.obs, dout=1)
         
         self.optimizer = optim.Adam(self.parameters(), lr=lr_rate, weight_decay=weight_decay) # TODO scheduler support
 
 
     def relu_net(self, din, layers=2, dout=1, hidden_size=128):
-        seq = torch.nn.Sequential()
+        seq_layers = []
         for i in range(layers):
             if i == 0:
-                seq.append(nn.Linear(din, hidden_size))
-                seq.append(nn.ReLU())
+                seq_layers.append(nn.Linear(din, hidden_size))
+                seq_layers.append(nn.ReLU())
             else:
-                seq.append(nn.Linear(hidden_size, hidden_size))
-                seq.append(nn.ReLU())
-        seq.append(nn.Linear(hidden_size, dout))
+                seq_layers.append(nn.Linear(hidden_size, hidden_size))
+                seq_layers.append(nn.ReLU())
+        seq_layers.append(nn.Linear(hidden_size, dout))
+        seq = torch.nn.Sequential(*seq_layers)
         return seq
        
     def tanh_net(self, x, layers=2, dout=1, hidden_size=128):
@@ -103,16 +105,13 @@ class Discriminator(object):
             log_q_tau = path_probs
             log_p_tau = self.reward_fn(raw_input) + self.gamma * self.value_fn_n(obs_next) - self.value_fn(obs)
             
-            print(f'log_q: {log_q_tau.shape}')
-            print(f'log_p: {log_p_tau.shape}')
-            
             log_pq = torch.logsumexp(torch.cat([log_p_tau, log_q_tau]), dim=0)
             scores = torch.exp(log_p_tau - log_pq)  
             eps=1e-20        
             score = torch.log(scores + eps) - torch.log(1 - scores + eps)
         else:
             score = self.reward_fn(raw_input)
-        return score
+        return score.detach().cpu().numpy()
             
         
 
@@ -124,7 +123,14 @@ class Discriminator(object):
         act = self.to_torch(np.concatenate([g_acs, e_acs], axis=0))
         nobs = self.to_torch(np.concatenate([g_nobs, e_nobs], axis=0))
         lprobs = self.to_torch(np.concatenate([g_probs, e_probs], axis=0))
-        
+        print(f'g_obs: {g_obs.shape}')
+        print(f'e_obs: {e_obs.shape}')
+        print(f'g_acs: {g_acs.shape}')
+        print(f'e_acs: {e_acs.shape}')
+        print(f'g_nobs: {g_nobs.shape}')
+        print(f'e_nobs: {e_nobs.shape}')
+        print(f'g_probs: {g_probs.shape}')
+        print(f'e_probs: {e_probs.shape}')
         raw_input = obs
         if not self.state_only:
             raw_input = torch.cat([obs, act], axis=1)
@@ -132,7 +138,10 @@ class Discriminator(object):
         log_q_tau = lprobs
         log_p_tau = self.reward_fn(raw_input) + self.gamma * self.value_fn_n(nobs) - self.value_fn(obs)
         log_pq = torch.logsumexp(torch.cat([log_p_tau, log_q_tau]), dim=0)
-        
+        print(f'labels: {labels.shape}')
+        print(f'log_q_tau: {log_q_tau.shape}')
+        print(f'log_p_tau: {log_p_tau.shape}')
+        print(f'log_pq: {log_pq.shape}')
         loss = -torch.mean(labels * (log_p_tau - log_pq) + (1 - labels) * (log_q_tau - log_pq))
         
         self.optimizer.zero_grad()

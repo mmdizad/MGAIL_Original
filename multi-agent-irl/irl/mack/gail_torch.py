@@ -94,7 +94,7 @@ class GeneralModel():
                 A_v = action_v
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
             X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             # calculations
@@ -104,7 +104,7 @@ class GeneralModel():
             # print('A:')
             # print(A[0:50])
 
-            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
@@ -135,9 +135,9 @@ class GeneralModel():
                 continue
 
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             pi = self.train_model[k].compute_pi(X)
-            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             lld = torch.mean(logpac)
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])

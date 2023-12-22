@@ -125,18 +125,18 @@ class GeneralModel(object):
             
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
             X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
     
-            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
-            vf_loss = torch.mean(torch.nn.MSELoss()(vf, R))
+            vf_loss = torch.mean(torch.nn.MSELoss(reduction="none")(vf, R))
             # print(f'vf: {vf[0:80]}')
             # print(f'R: {R[0:80]}')
             # print(f'ADV:\n{ADV[0:80]}')
@@ -162,9 +162,9 @@ class GeneralModel(object):
                 continue
 
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             pi = self.train_model[k].compute_pi(X)
-            logpac = torch.nn.CrossEntropyLoss()(pi, A)
+            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             lld = torch.mean(logpac)
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
@@ -183,14 +183,20 @@ class GeneralModel(object):
             if self.identical[k]:
                 continue
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64, requires_grad=True).to(self.device)
+            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
             pi = self.train_model[k].compute_pi(X)
-            log_pac = torch.nn.CrossEntropyLoss()(pi, A)
+            print(f'pi: {pi.shape}')
+            log_pac = -1 * torch.nn.CrossEntropyLoss(reduction="none")(pi, A).detach().cpu().numpy()
+            print(f'log_pac: {log_pac.shape}')
             if self.scale[k] == 1:
                 action_prob.append(log_pac)
             else:
                 log_pac = np.split(log_pac, self.scale[k], axis=0)
-                action_prob += log_pac
+                action_prob.append(log_pac)
+        print(f'action_prob: {len(action_prob)}')
+        print(f'action_prob: {(action_prob[0])}')
+        action_prob = np.array(action_prob)
+        print(f'ac: {action_prob.shape}')
         return action_prob
 
     def get_log_action_prob_step(self, obs, actions):
@@ -427,6 +433,10 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
           nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
           bc_iters=500, identical=None, d_iters=1, rew_scale=0.1, weight_decay=1e-4):
+    print(f"learning rate: {lr}")
+    print(f"dis lr: {dis_lr}")
+    print(f"weight decay: {weight_decay}")
+    print(f"bc iters: {bc_iters}")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
     buffer = None
@@ -436,7 +446,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     ob_space = env.observation_space
     ac_space = env.action_space
     num_agents = (len(ob_space))
-    make_model = lambda: GeneralModel(policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=nprocs, nsteps=nsteps,
+    make_model = lambda: GeneralModel(policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=nprocs, nsteps=nsteps,
                                nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=vf_fisher_coef,
                                lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
                                lrschedule=lrschedule, identical=identical)
@@ -515,7 +525,8 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
 
             e_a = [np.argmax(e_actions[k], axis=1) for k in range(len(e_actions))]
             g_a = [np.argmax(g_actions[k], axis=1) for k in range(len(g_actions))]
-
+            print(f'g_obs: {np.array(g_obs).shape}')
+            print(f'g_a: {np.array(g_a).shape}')
             g_log_prob = model.get_log_action_prob(g_obs, g_a)
             e_log_prob = model.get_log_action_prob(e_obs, e_a)
             if disc_type == 'decentralized':

@@ -56,6 +56,7 @@ class CategoricalPolicy(nn.Module):
 
     def step_log_prob(self, ob, acts):
         pi = self.compute_pi(ob)
+        acts = torch.tensor(acts, dtype=torch.int64).to(self.device)
         loss = -1 * nn.CrossEntropyLoss()(pi, acts)
         return loss.reshape((-1, 1))
 
