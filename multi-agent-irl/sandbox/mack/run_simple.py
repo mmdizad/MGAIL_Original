@@ -37,12 +37,12 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu)
     env = SubprocVecEnv([create_env(i) for i in range(num_cpu)], is_multi_agent=True)
     policy_fn = CategoricalPolicy
     learn(policy_fn, env, seed, total_timesteps=int(num_timesteps * 1.1), nprocs=num_cpu,
-          nsteps=timesteps_per_batch // num_cpu, lr=lr, ent_coef=0.00, identical=make_env.get_identical(env_id))
+          nsteps=timesteps_per_batch // num_cpu, lr=lr, ent_coef=0.00, identical=make_env.get_identical(env_id), save_interval=1000)
     env.close()
 
 
 @click.command()
-@click.option('--logdir', type=click.STRING, default='./atlas/u/lantaoyu')
+@click.option('--logdir', type=click.STRING, default='./results/target_model')
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
                                           'simple_tag', 'simple_spread', 'simple_adversary']), default='simple')
