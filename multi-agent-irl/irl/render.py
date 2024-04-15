@@ -10,11 +10,14 @@ import tensorflow as tf
 import make_env
 import numpy as np
 from rl.common.misc_util import set_global_seeds
-from sandbox.mack.acktr_disc import Model, onehot
+from sandbox.mack.acktr_disc import onehot
+from irl.mack.gail import Model
 from sandbox.mack.policies import CategoricalPolicy
 from rl import bench
 import imageio
 import pickle as pkl
+import os
+os.environ['DISPLAY'] = ':1'
 
 
 @click.command()
@@ -35,7 +38,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './atlas/trained_model/gail/simple_spread/decentralized/s-200/l-0.1-b-1000-d-0.1-c-500/seed-1/m_00001'
+    path = './results/tensor_trained/gail/simple_spread/decentralized/s-200/l-0.1-b-1000-d-0.1-c-500/seed-1/m_00001'
 
     print(path)
     n_agents = len(env.action_space)
@@ -53,14 +56,14 @@ def render(env, image):
     make_model = lambda: Model(
         CategoricalPolicy, ob_space, ac_space, 1, total_timesteps=1e7, nprocs=2, nsteps=500,
         nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.01, max_grad_norm=0.5, kfac_clip=0.001,
-        lrschedule='linear', identical=make_env.get_identical(env_id), use_kfac=False)
+        lrschedule='linear', identical=make_env.get_identical(env_id))
     model = make_model()
     print("load model from", path)
     model.load(path)
 
     images = []
     sample_trajs = []
-    num_trajs = 100
+    num_trajs = 10000
     max_steps = 50
     avg_ret = [[] for _ in range(n_agents)]
 
@@ -125,7 +128,7 @@ def render(env, image):
     # pkl.dump(sample_trajs, open(path + '-%dtra.pkl' % num_trajs, 'wb'))
     if image:
         print(images.shape)
-        imageio.mimsave(path + '.mp4', images, fps=25)
+        imageio.mimsave(path + '.gif', images, duration=int(len(images) / 25), loop=1)
 
 
 if __name__ == '__main__':

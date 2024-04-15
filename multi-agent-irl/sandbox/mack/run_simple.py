@@ -45,12 +45,11 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu)
 @click.option('--logdir', type=click.STRING, default='./results/target_model')
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_spread')
 @click.option('--lr', type=click.FLOAT, default=0.1)
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--batch_size', type=click.INT, default=1000)
-@click.option('--atlas', is_flag=True, flag_value=True)
-def main(logdir, env, lr, seed, batch_size, atlas):
+def main(logdir, env, lr, seed, batch_size):
     env_ids = [env]
     lrs = [lr]
     seeds = [seed]

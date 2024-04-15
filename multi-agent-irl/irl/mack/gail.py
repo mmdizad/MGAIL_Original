@@ -56,11 +56,7 @@ class Model(object):
                 R.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
                 PG_LR.append(tf.placeholder(tf.float32, []))
 
-        # A = [tf.placeholder(tf.int32, [nbatch]) for _ in range(num_agents)]
-        # ADV = [tf.placeholder(tf.float32, [nbatch]) for _ in range(num_agents)]
-        # R = [tf.placeholder(tf.float32, [nbatch]) for _ in range(num_agents)]
-        # PG_LR = [tf.placeholder(tf.float32, []) for _ in range(num_agents)]
-        # VF_LR = [tf.placeholder(tf.float32, []) for _ in range(num_agents)]
+
         pg_loss, entropy, vf_loss, train_loss = [], [], [], []
         self.model = step_model = []
         self.model2 = train_model = []
@@ -187,10 +183,10 @@ class Model(object):
                     action_v = np.concatenate(action_v, axis=0)
                     new_map.update({train_model[k].A_v: action_v})
                     td_map.update({train_model[k].A_v: action_v})
-                print(f'rewards: {rewards[k][0:30]}')
-                print(rewards[k].shape)
-                print(f'advs: {advs[k][0:30]}')
-                print(advs[k].shape)
+                # print(f'rewards: {rewards[k][0:30]}')
+                # print(rewards[k].shape)
+                # print(f'advs: {advs[k][0:30]}')
+                # print(advs[k].shape)
                 new_map.update({
                     train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
                     train_model[k].X_v: np.concatenate([ob.copy() for j in range(k, pointer[k])], axis=0),

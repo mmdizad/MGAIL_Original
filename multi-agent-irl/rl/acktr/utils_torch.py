@@ -9,7 +9,7 @@ def sample(logits, device, axis=1):
 def fc(ns, nh, init_scale=1.0):
     linear = nn.Linear(ns, nh)
     nn.init.orthogonal_(linear.weight, gain=init_scale)
-    nn.init.constant_(linear.bias, 0.0)
+    nn.init.constant_(linear.bias, 0.01)
     return linear
 
 def constant(p):

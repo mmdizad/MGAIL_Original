@@ -13,6 +13,7 @@ from rl.acktr.utils_torch import (Scheduler, cat_entropy, discount_with_dones,
                                   mse, multionehot, onehot)
 from rl.common.torch_util import explained_variance, set_global_seeds
 from scipy.stats import pearsonr, spearmanr
+from irl.mack.kfac_torch import KFACOptimizer
 
 
 class GeneralModel():
@@ -27,6 +28,7 @@ class GeneralModel():
         self.num_agents = num_agents = len(ob_space)
         self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
         self.identical = identical
+        self.vf_fisher_coef = vf_fisher_coef
         if self.identical is None:
             self.identical = [False for _ in range(self.num_agents)]
             
@@ -41,16 +43,13 @@ class GeneralModel():
                 h = k
         self.pointer[h] = num_agents
         
-        self.step_model = []
         self.train_model = []
         for k in range(num_agents):
             if self.identical[k]:
-                self.step_model.append(self.step_model[-1])
                 self.train_model.append(self.train_model[-1])
             else:
                 self.train_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
                                             nstack, self.device).to(self.device))
-                self.step_model.append(self.train_model[-1])
                        
         self.optim = []
         self.clones = []
@@ -60,12 +59,14 @@ class GeneralModel():
                 self.optim.append(self.optim[-1])
                 self.clones.append(self.clones[-1])
             else:
-                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=weight_decay))
+                self.optim.append(
+                    KFACOptimizer(self.train_model[k], lr=lr, kl_clip=kfac_clip, weight_decay=weight_decay)
+                )
                 self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=weight_decay))
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-        self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
+        self.initial_state = [self.train_model[k].initial_state for k in range(num_agents)]
         
         
     def train(self, obs, states, rewards, masks, actions, values):
@@ -100,9 +101,9 @@ class GeneralModel():
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
             # print('pi:')
-            # print(pi[0:50])
+            # print(pi[0:30])
             # print('A:')
-            # print(A[0:50])
+            # print(A[0:30])         
 
             logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             entropy = torch.mean(cat_entropy(pi))
@@ -115,6 +116,22 @@ class GeneralModel():
             # print(f'ADV:\n{ADV[0:80]}')
             loss = pg_loss + self.vf_coef * vf_loss
             # print('#' * 50)
+            if self.optim[k].steps % self.optim[k].Ts == 0:
+                self.train_model[k].zero_grad()
+                pg_fisher_loss = -torch.mean(logpac)
+                
+                value_noise = torch.randn(vf.size())
+                if vf.is_cuda:
+                    value_noise = value_noise.cuda()
+
+                sample_values = vf + value_noise
+                vf_fisher_loss = -(vf - sample_values.detach()).pow(2).mean()
+
+                fisher_loss = pg_fisher_loss + vf_fisher_loss * self.vf_fisher_coef
+                self.optim[k].acc_stats = True
+                fisher_loss.backward(retain_graph=True)
+                self.optim[k].acc_stats = False
+            
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
 
@@ -162,7 +179,6 @@ class GeneralModel():
         for k in range(self.num_agents):
             key1 = f'train_model{k+1}'
             self.train_model[k].load_state_dict(models_dict[key1])
-            self.step_model[k] = self.train_model[k]
         
     def step(self, ob, av):
         a, v, s = [], [], []
@@ -170,7 +186,7 @@ class GeneralModel():
         for k in range(self.num_agents):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
-            a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a_, v_, s_ = self.train_model[k].step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -182,7 +198,7 @@ class GeneralModel():
         for k in range(self.num_agents):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
-            a_, v_, s_ = self.step_model[k].best_step(ob[k], obs, a_v)
+            a_, v_, s_ = self.train_model[k].best_step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -195,7 +211,7 @@ class GeneralModel():
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
             with torch.no_grad():
-                v_ = self.step_model[k].value(ob, a_v)
+                v_ = self.train_model[k].value(ob, a_v)
             v.append(v_.detach().cpu().numpy())
         return v
     
@@ -326,7 +342,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
           nsteps=20, nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
           bc_iters=500, identical=None, d_iters=1, weight_decay=1e-4):
-    start_time = time.time()
+    # start_time = time.time()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     set_global_seeds(seed)
     buffer = None
@@ -372,7 +388,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
         lld_loss = model.clone(e_obs, e_a)
         # print(lld_loss)
 
-    print("--- init %s seconds ---" % (time.time() - start_time))
+    # print("--- init %s seconds ---" % (time.time() - start_time))
 
     for update in range(1, total_timesteps // nbatch + 1):
         obs, states, rewards, masks, actions, values, all_obs,\
@@ -433,17 +449,17 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
             logger.record_tabular("data/fps", fps)
 
             for k in range(model.num_agents):
-                logger.record_tabular("explained_variance %d" % k, float(ev[k]))
+                logger.record_tabular("data/explained_variance %d" % k, float(ev[k]))
                 if update > 10:
                     logger.record_tabular("data/policy_entropy %d" % k, float(policy_entropy[k]))
                     logger.record_tabular("data/policy_loss %d" % k, float(policy_loss[k]))
                     logger.record_tabular("data/value_loss %d" % k, float(value_loss[k]))
                     try:
-                        logger.record_tabular('data/pearson %d' % k, float(
+                        logger.record_tabular('data/rew/pearson %d' % k, float(
                             pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('data/reward %d' % k, float(np.mean(rewards[k])))
-                        logger.record_tabular('data/true reward %d' % k, float(np.mean(mh_true_returns[k])))
-                        logger.record_tabular('data/spearman %d' % k, float(
+                        logger.record_tabular('data/rew/disc pred %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('data/rew/true %d' % k, float(np.mean(mh_true_returns[k])))
+                        logger.record_tabular('data/rew/spearman %d' % k, float(
                             spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                     except:
                         pass
@@ -462,13 +478,9 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
 
             g_loss_m = np.mean(g_loss, axis=1)
             e_loss_m = np.mean(e_loss, axis=1)
-            # g_loss_gp_m = np.mean(g_loss_gp, axis=1)
-            # e_loss_gp_m = np.mean(e_loss_gp, axis=1)
             for k in range(num_agents):
                 logger.record_tabular("data/g_loss %d" % k, g_loss_m[k])
                 logger.record_tabular("data/e_loss %d" % k, e_loss_m[k])
-                # logger.record_tabular("g_loss_gp %d" % k, g_loss_gp_m[k])
-                # logger.record_tabular("e_loss_gp %d" % k, e_loss_gp_m[k])
 
             logger.dump_tabular()
         if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():

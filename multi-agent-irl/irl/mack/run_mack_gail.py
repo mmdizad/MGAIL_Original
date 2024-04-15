@@ -40,15 +40,15 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     expert = MADataSet(expert_path, ret_threshold=ret_threshold, traj_limitation=traj_limitation)
     learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1), nprocs=num_cpu,
           nsteps=timesteps_per_batch // num_cpu, lr=lr, ent_coef=0.0, dis_lr=dis_lr,
-          disc_type=disc_type, bc_iters=bc_iters, identical=make_env.get_identical(env_id))
+          disc_type=disc_type, bc_iters=bc_iters, identical=make_env.get_identical(env_id), save_interval=500)
     env.close()
 
 
 @click.command()
-@click.option('--logdir', type=click.STRING, default='./atlas/orig_model')
+@click.option('--logdir', type=click.STRING, default='./results/test')
 @click.option('--env', type=click.STRING, default='simple_spread')
 @click.option('--expert_path', type=click.STRING,
-              default='./atlas/model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint50000-50000tra.pkl')
+              default='./results/target_model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint17000-1000tra.pkl')
 @click.option('--atlas', is_flag=True, flag_value=True)
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
@@ -61,11 +61,12 @@ def main(logdir, env, expert_path, atlas, seed, traj_limitation, ret_threshold, 
     lrs = [0.1]
     seeds = [seed]
     batch_sizes = [1000]
+    num_timesteps = 5e7
 
     for env_id, seed, lr, batch_size in itertools.product(env_ids, seeds, lrs, batch_sizes):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-b-{}-d-{}-c-{}/seed-{}'.format(
               traj_limitation, lr, batch_size, dis_lr, bc_iters, seed),
-              env_id, 5e7, lr, batch_size, seed, batch_size // 250, expert_path,
+              env_id, num_timesteps, lr, batch_size, seed, batch_size // 250, expert_path,
               traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters)
 
 

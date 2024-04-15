@@ -9,7 +9,7 @@ disc_types = ['decentralized', 'centralized', 'single']
 class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
-                 learning_rate=0.01, max_grad_norm=0.5, weight_decay=1e-4):
+                 learning_rate=0.01, max_grad_norm=0.5, weight_decay=1e-5):
         super(Discriminator, self).__init__()
         self.max_grad_norm = max_grad_norm
         self.hidden_size = hidden_size        
@@ -32,7 +32,7 @@ class Discriminator(nn.Module):
                                          output_shape=self.num_outputs)
         else:
             assert False
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay) # TODO scheduler support
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=1e-5) # TODO scheduler support
         
     def build_graph(self, input_shape, output_shape):
         disc = nn.Sequential(
@@ -40,7 +40,7 @@ class Discriminator(nn.Module):
             nn.ReLU(),
             fc(self.hidden_size, self.hidden_size),
             nn.ReLU(),
-            fc(self.hidden_size, output_shape)
+            fc(self.hidden_size, output_shape),
         )
         return disc
     
@@ -54,8 +54,6 @@ class Discriminator(nn.Module):
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
         loss_pi, loss_exp, back_loss = self.calculate_loss(ob_pi, act_pi, ob_exp, act_exp)
         loss = loss_pi + loss_exp
-        print(f'additive loss: {loss}')
-        print(f'original loss: {back_loss}')
         self.optimizer.zero_grad()
         back_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
@@ -65,16 +63,11 @@ class Discriminator(nn.Module):
     def calculate_loss(self, ob_pi, act_pi, ob_exp, act_exp):
         logits_pi = self.forward(ob_pi, act_pi)
         logits_exp = self.forward(ob_exp, act_exp)
+        logits = torch.cat([logits_pi, logits_exp], dim=0)
+        
         labels_pi = torch.zeros((ob_pi.shape[0], 1), device=self.device)
         labels_exp = torch.ones((ob_exp.shape[0], 1), device=self.device)
-        print(f"logits_pi: {logits_pi.shape}")
-        print(f"logits_exp: {logits_exp.shape}")
-        logits = torch.cat([logits_pi, logits_exp], dim=0)
-        print(f"logits: {logits.shape}")
-        print(f"labels_pi: {labels_pi.shape}")
-        print(f"labels_exp: {labels_exp.shape}")
         labels = torch.cat([labels_pi, labels_exp], dim=0)
-        print(f"labels: {labels.shape}")
         loss_pi = F.binary_cross_entropy_with_logits(logits_pi, labels_pi)
         loss_exp = F.binary_cross_entropy_with_logits(logits_exp, labels_exp)
         loss = F.binary_cross_entropy_with_logits(logits, labels)

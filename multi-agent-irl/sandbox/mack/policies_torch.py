@@ -14,18 +14,26 @@ class CategoricalPolicy(nn.Module):
         nact = ac_space.n
         all_ac_shape = (sum([ac.n for ac in ac_spaces]) - nact) * nstack
 
-        self.fc1 = fc(ob_shape, nh=128, init_scale=np.sqrt(2))
-        self.fc2 = fc(128, nh=128, init_scale=np.sqrt(2))
-        self.pi_f = fc(128, nact)
+        self.pi = nn.Sequential(
+            fc(ob_shape, nh=128, init_scale=np.sqrt(2)),
+            nn.ReLU(),
+            fc(128, nh=128, init_scale=np.sqrt(2)),
+            nn.ReLU(),
+            fc(128, nact)
+        )
 
         if len(ob_spaces) > 1:
             in_space = all_ob_shape + all_ac_shape
         else:
             in_space = all_ob_shape
             
-        self.fc3 = fc(in_space, nh=256, init_scale=np.sqrt(2))
-        self.fc4 = fc(256, nh=256, init_scale=np.sqrt(2))
-        self.vf_f = fc(256, 1)
+        self.vf = nn.Sequential(
+            fc(in_space, nh=256, init_scale=np.sqrt(2)),
+            nn.ReLU(),
+            fc(256, nh=256, init_scale=np.sqrt(2)),
+            nn.ReLU(),
+            fc(256, 1)
+        )
         
         self.initial_state = [] # not stateful
 
@@ -36,9 +44,7 @@ class CategoricalPolicy(nn.Module):
 
     def compute_pi(self, ob):
         ob = torch.tensor(ob, dtype=torch.float32, requires_grad=True).to(self.device)
-        h1 = F.relu(self.fc1(ob))
-        h2 = F.relu(self.fc2(h1))
-        pi = self.pi_f(h2)
+        pi = self.pi(ob)
         return pi
     
     def compute_vf(self, obs, a_v):
@@ -48,9 +54,7 @@ class CategoricalPolicy(nn.Module):
             Y = torch.cat([obs, a_v], dim=1)
         else:
             Y = obs
-        h3 = F.relu(self.fc3(Y))
-        h4 = F.relu(self.fc4(h3))
-        vf = self.vf_f(h4)
+        vf = self.vf(Y)
         return vf
 
 
@@ -75,5 +79,4 @@ class CategoricalPolicy(nn.Module):
         return vf[:, 0]
     
     def policy_params(self):
-        combined_params = list(self.fc1.parameters()) + list(self.fc2.parameters()) + list(self.pi_f.parameters())
-        return combined_params 
+        return self.pi.parameters() 
