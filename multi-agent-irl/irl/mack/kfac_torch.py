@@ -206,15 +206,19 @@ class KFACOptimizer(optim.Optimizer):
             la = self.damping + self.weight_decay
 
             if self.steps % self.Tf == 0:
-                # My asynchronous implementation exists, I will add it later.
-                # Experimenting with different ways to this in PyTorch.
-                self.d_a[m], self.Q_a[m] = torch.symeig(
-                    self.m_aa[m], eigenvectors=True)
-                self.d_g[m], self.Q_g[m] = torch.symeig(
-                    self.m_gg[m], eigenvectors=True)
+                try:
+                    # My asynchronous implementation exists, I will add it later.
+                    # Experimenting with different ways to this in PyTorch.
+                    self.d_a[m], self.Q_a[m] = torch.symeig(
+                        self.m_aa[m], eigenvectors=True)
+                    self.d_g[m], self.Q_g[m] = torch.symeig(
+                        self.m_gg[m], eigenvectors=True)
 
-                self.d_a[m].mul_((self.d_a[m] > 1e-6).float())
-                self.d_g[m].mul_((self.d_g[m] > 1e-6).float())
+                    self.d_a[m].mul_((self.d_a[m] > 1e-6).float())
+                    self.d_g[m].mul_((self.d_g[m] > 1e-6).float())
+                except Exception as e:
+                    print(f'kfac step error: {repr(e)}')
+                    
 
             if classname == 'Conv2d':
                 p_grad_mat = p.grad.data.view(p.grad.data.size(0), -1)

@@ -40,7 +40,7 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
     learn(policy_fn, expert, env, env_id, seed, total_timesteps=int(num_timesteps * 1.1),
      nprocs=num_cpu, nsteps=timesteps_per_batch // num_cpu, lr=lr, vf_coef=vf_coef,
         ent_coef=ent_coef, dis_lr=dis_lr, disc_type=disc_type, bc_iters=bc_iters,
-        identical=make_env.get_identical(env_id), d_iters=d_iters, weight_decay=weight_decay, save_interval=250)
+        identical=make_env.get_identical(env_id), d_iters=d_iters, weight_decay=weight_decay, save_interval=500)
 
 
 
@@ -48,30 +48,30 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--logdir', type=click.STRING, default='./results/torch_kfac')
 @click.option('--env', type=click.STRING, default='simple_spread')
 @click.option('--expert_path', type=click.STRING,
-              default='./results/target_model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint17000-1000tra.pkl')
+              default='./results/target_model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint20000-10000tra.pkl')
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
 @click.option('--ret_threshold', type=click.FLOAT, default=-10)
 @click.option('--disc_type', type=click.Choice(['decentralized', 'centralized', 'single']), default='decentralized')
-@click.option('--bc_iters', type=click.INT, default=10000)
+@click.option('--bc_iters', type=click.INT, default=500)
 def main(logdir, env, expert_path, seed, traj_limitation, ret_threshold, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [0.1]
-    dis_lrs = [0.001]
+    lrs = [0.2]
+    dis_lrs = [0.1]
     seeds = [1]
     batch_sizes = [1000]
-    weight_decays = [0, 1e-4]
-    bc_iters = 1000
+    weight_decays = [0]
+    bc_iters = 500
     d_iters = 1
-    num_timesteps = 3e7
+    num_timesteps = 5e7
     ent_coef = 0.00
     vf_coef = 1
-
+    
     for env_id, seed, lr, dis_lr, batch_size, weight_decay in itertools.product(env_ids, seeds, lrs, dis_lrs, batch_sizes, weight_decays):
         train(logdir + '/gail/' + env_id + '/' + disc_type + '/s-{}/l-{}-d-{}-b-{}-bc-{}-w-{}/seed-{}'.format(
-              traj_limitation, lr, dis_lr, batch_size, bc_iters, weight_decay, seed),
+              traj_limitation, lr, lr, batch_size, bc_iters, weight_decay, seed),
               env_id, num_timesteps, lr, batch_size, seed, batch_size // 250, expert_path,
-              traj_limitation, ret_threshold, dis_lr, disc_type=disc_type, bc_iters=bc_iters, 
+              traj_limitation, ret_threshold, lr, disc_type=disc_type, bc_iters=bc_iters, 
               weight_decay=weight_decay, d_iters=d_iters, ent_coef=ent_coef, vf_coef=vf_coef)
 
 

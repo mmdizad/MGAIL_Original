@@ -183,10 +183,7 @@ class Model(object):
                     action_v = np.concatenate(action_v, axis=0)
                     new_map.update({train_model[k].A_v: action_v})
                     td_map.update({train_model[k].A_v: action_v})
-                # print(f'rewards: {rewards[k][0:30]}')
-                # print(rewards[k].shape)
-                # print(f'advs: {advs[k][0:30]}')
-                # print(advs[k].shape)
+
                 new_map.update({
                     train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
                     train_model[k].X_v: np.concatenate([ob.copy() for j in range(k, pointer[k])], axis=0),

@@ -3,13 +3,15 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from rl.acktr.utils_torch import fc
+from irl.mack.kfac_torch import KFACOptimizer
+from rl.acktr.utils_torch import Scheduler
 
 disc_types = ['decentralized', 'centralized', 'single']
 
 class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
-                 learning_rate=0.01, max_grad_norm=0.5, weight_decay=1e-5):
+                 learning_rate=0.01, max_grad_norm=0.5, kfac_clip=0.001, total_steps=50000):
         super(Discriminator, self).__init__()
         self.max_grad_norm = max_grad_norm
         self.hidden_size = hidden_size        
@@ -21,7 +23,7 @@ class Discriminator(nn.Module):
         self.all_ob_shape = sum([obs.shape[0] for obs in ob_spaces]) * nstack
         self.all_ac_shape = sum([ac.n for ac in ac_spaces]) * nstack
         self.device = device
-        self.logsigmoid = torch.nn.LogSigmoid()
+        self.lr = Scheduler(v=learning_rate, nvalues=total_steps, schedule='linear')
                 
         if disc_type == 'decentralized':
             self.disc = self.build_graph(input_shape=self.ob_shape + self.ac_shape, output_shape=self.num_outputs)
@@ -32,7 +34,7 @@ class Discriminator(nn.Module):
                                          output_shape=self.num_outputs)
         else:
             assert False
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=1e-5) # TODO scheduler support
+        self.optimizer = KFACOptimizer(self, lr=learning_rate, kl_clip=kfac_clip)
         
     def build_graph(self, input_shape, output_shape):
         disc = nn.Sequential(
@@ -53,7 +55,20 @@ class Discriminator(nn.Module):
     
     def train(self, ob_pi, act_pi, ob_exp, act_exp):
         loss_pi, loss_exp, back_loss = self.calculate_loss(ob_pi, act_pi, ob_exp, act_exp)
-        loss = loss_pi + loss_exp
+        
+        cur_lr = self.lr.value()
+        for g in self.optimizer.param_groups:
+                g['lr'] = cur_lr
+        self.optimizer.lr = cur_lr
+                
+        if self.optimizer.steps % self.optimizer.Ts == 0:
+            self.zero_grad()
+            fisher_loss = -back_loss
+            
+            self.optimizer.acc_stats = True
+            fisher_loss.backward(retain_graph=True)
+            self.optimizer.acc_stats = False
+            
         self.optimizer.zero_grad()
         back_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
@@ -76,7 +91,7 @@ class Discriminator(nn.Module):
     
     def get_reward(self, ob, act):
         score = self.forward(ob, act)
-        reward = self.logsigmoid(score)
+        reward = 2.0 * torch.sigmoid(score) - 1
         return reward.detach().cpu().numpy()
     
     def save(self, save_path='disc_model_weights.pth'):

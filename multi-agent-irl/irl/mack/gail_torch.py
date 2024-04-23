@@ -62,7 +62,9 @@ class GeneralModel():
                 self.optim.append(
                     KFACOptimizer(self.train_model[k], lr=lr, kl_clip=kfac_clip, weight_decay=weight_decay)
                 )
-                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=weight_decay))
+                self.clones.append(
+                    KFACOptimizer(self.train_model[k].pi, lr=lr, kl_clip=kfac_clip, weight_decay=weight_decay)
+                )
         
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
@@ -71,8 +73,7 @@ class GeneralModel():
         
     def train(self, obs, states, rewards, masks, actions, values):
         advs = [rewards[k] - values[k] for k in range(self.num_agents)]
-        for _ in range(len(obs)):
-            cur_lr = self.lr.value()
+        cur_lr = self.lr.value()
 
         ob = np.concatenate(obs, axis=1)
         
@@ -100,10 +101,7 @@ class GeneralModel():
             R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-            # print('pi:')
-            # print(pi[0:30])
-            # print('A:')
-            # print(A[0:30])         
+       
 
             logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             entropy = torch.mean(cat_entropy(pi))
@@ -111,11 +109,9 @@ class GeneralModel():
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
             vf_loss = torch.mean(torch.nn.MSELoss()(vf, R))
-            # print(f'vf: {vf[0:80]}')
-            # print(f'R: {R[0:80]}')
-            # print(f'ADV:\n{ADV[0:80]}')
             loss = pg_loss + self.vf_coef * vf_loss
-            # print('#' * 50)
+
+            # optimizer loss
             if self.optim[k].steps % self.optim[k].Ts == 0:
                 self.train_model[k].zero_grad()
                 pg_fisher_loss = -torch.mean(logpac)
@@ -134,6 +130,7 @@ class GeneralModel():
             
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
+            self.optim[k].lr = cur_lr
 
             self.optim[k].zero_grad()
             loss.backward()
@@ -156,8 +153,19 @@ class GeneralModel():
             pi = self.train_model[k].compute_pi(X)
             logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             lld = torch.mean(logpac)
+            
+            if self.clones[k].steps % self.clones[k].Ts == 0:
+                self.train_model[k].zero_grad()
+                pg_fisher_loss = -lld
+
+                fisher_loss = pg_fisher_loss
+                self.clones[k].acc_stats = True
+                fisher_loss.backward(retain_graph=True)
+                self.clones[k].acc_stats = False
+            
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
+            self.optim[k].lr = cur_lr
 
             self.clones[k].zero_grad()
             lld.backward()
@@ -364,17 +372,15 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     if disc_type == 'decentralized':
         discriminator = [
             Discriminator(ob_space, ac_space, nstack, k, device,
-                          disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay, learning_rate=dis_lr)
-            .to(device) for k in range(num_agents)
+                          disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device) 
+            for k in range(num_agents)
         ]
     elif disc_type == 'centralized':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
-                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay,
-                                      learning_rate=dis_lr).to(device)
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device)
     elif disc_type == 'single':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
-                                      disc_type=disc_type, max_grad_norm=max_grad_norm, weight_decay=weight_decay,
-                                      learning_rate=dis_lr).to(device)
+                                      disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device)
     else:
         assert False
         
@@ -455,23 +461,23 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                     logger.record_tabular("data/policy_loss %d" % k, float(policy_loss[k]))
                     logger.record_tabular("data/value_loss %d" % k, float(value_loss[k]))
                     try:
-                        logger.record_tabular('data/rew/pearson %d' % k, float(
+                        logger.record_tabular('reward/pearson %d' % k, float(
                             pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('data/rew/disc pred %d' % k, float(np.mean(rewards[k])))
-                        logger.record_tabular('data/rew/true %d' % k, float(np.mean(mh_true_returns[k])))
-                        logger.record_tabular('data/rew/spearman %d' % k, float(
+                        logger.record_tabular('reward/disc pred %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('reward/true %d' % k, float(np.mean(mh_true_returns[k])))
+                        logger.record_tabular('reward/spearman %d' % k, float(
                             spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                     except:
                         pass
             if update > 10 and env_id == 'simple_tag':
                 try:
-                    logger.record_tabular('data/in_pearson_0_2', float(
+                    logger.record_tabular('reward/in_pearson_0_2', float(
                         pearsonr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('data/in_pearson_1_2', float(
+                    logger.record_tabular('reward/in_pearson_1_2', float(
                         pearsonr(rewards[1].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('data/in_spearman_0_2', float(
+                    logger.record_tabular('reward/in_spearman_0_2', float(
                         spearmanr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('data/in_spearman_1_2', float(
+                    logger.record_tabular('reward/in_spearman_1_2', float(
                         spearmanr(rewards[1].flatten(), rewards[2].flatten())[0]))
                 except:
                     pass
