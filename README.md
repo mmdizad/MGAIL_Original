@@ -12,7 +12,7 @@ The original TensorFlow version of this implementation can be found in the follo
 ## Results
 
 ### sample spread
-![simple_spread](https://github.com/mmdizad/MGAIL_Original/assets/79264915/d4ef27a2-5841-468b-86fd-bcf5a7689261)
+<img src="checkpoints/simple_spread/l-0.1-d-0.1-b-1000-bc-500-w-0/seed-1/m_55000.gif" width="500" height="500"/>
 
 ### simple speaker listener
-<img src="checkpoints/simple_speaker_listener/l-0.01-d-0.01-b-1000-bc-500-w-0/seed-1" width="250" height="250"/>
+<img src="checkpoints/simple_speaker_listener/l-0.01-d-0.01-b-1000-bc-500-w-0/seed-1" width="500" height="500"/>
