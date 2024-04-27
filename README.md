@@ -15,4 +15,4 @@ The original TensorFlow version of this implementation can be found in the follo
 ![simple_spread](https://github.com/mmdizad/MGAIL_Original/assets/79264915/d4ef27a2-5841-468b-86fd-bcf5a7689261)
 
 ### simple speaker listener
-![simple_speaker_listener](https://github.com/mmdizad/MGAIL_Original/assets/79264915/8b511d42-2e27-4dc3-a501-25b7a25f6f00)
+<img src="checkpoints/simple_speaker_listener/l-0.01-d-0.01-b-1000-bc-500-w-0/seed-1" width="250" height="250"/>
