@@ -21,7 +21,7 @@ from tqdm import tqdm
 @click.command()
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_spread')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_speaker_listener')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
     
@@ -35,7 +35,15 @@ def render(env, image):
         return env
 
     env = create_env()
-    paths = ['./results/torch_kfac/gail/simple_spread/decentralized/s-200/l-0.1-d-0.001-b-1000-bc-500-w-0/seed-1/m_00001',
+    paths = [
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_00001',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_04000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_08000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_12000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_16000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_20000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_24000',
+             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_28000',
             ]
     for path in paths:
         test(path, env, env_id, image)
@@ -84,7 +92,8 @@ def test(path, env, env_id, image):
             done = False
             
             while not done:
-                action, _, _ = model.step(obs, action)
+                with torch.no_grad():
+                    action, _, _ = model.step(obs, action)
                 actions_list = [onehot(action[k][0], n_actions[k]) for k in range(n_agents)]
                 # actions_list = [onehot(np.random.randint(n_actions[k]), n_actions[k]) for k in range(n_agents)]
                 for k in range(n_agents):
@@ -118,7 +127,7 @@ def test(path, env, env_id, image):
             }
             
             sample_trajs.append(traj_data)
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print(f'traj_num {i} expected_return {ep_ret}')
                 
             for k in range(n_agents):
@@ -132,7 +141,7 @@ def test(path, env, env_id, image):
         # pkl.dump(sample_trajs, open(path + '-%dtra.pkl' % num_trajs, 'wb'))
         if image:
             print(images.shape)
-            imageio.mimsave(path + '.gif', images, duration=int(len(images) / 25), loop=1)
+            imageio.mimsave(path + '.gif', images, duration=int(len(images[0]) / 20), loop=1)
 
 
 if __name__ == '__main__':

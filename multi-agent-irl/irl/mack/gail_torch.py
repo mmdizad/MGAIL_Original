@@ -463,24 +463,12 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                     try:
                         logger.record_tabular('reward/pearson %d' % k, float(
                             pearsonr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('reward/disc pred %d' % k, float(np.mean(rewards[k])))
-                        logger.record_tabular('reward/true %d' % k, float(np.mean(mh_true_returns[k])))
+                        logger.record_tabular('reward/disc pred %d' % k, float(np.sum(mh_rewards[k])))
+                        logger.record_tabular('reward/true %d' % k, float(np.sum(mh_true_rewards[k])))
                         logger.record_tabular('reward/spearman %d' % k, float(
-                            spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
+                            spearmanr(rewards[k].flatten(), mh_true_returns[k].flatten())[0]))    
                     except:
                         pass
-            if update > 10 and env_id == 'simple_tag':
-                try:
-                    logger.record_tabular('reward/in_pearson_0_2', float(
-                        pearsonr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('reward/in_pearson_1_2', float(
-                        pearsonr(rewards[1].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('reward/in_spearman_0_2', float(
-                        spearmanr(rewards[0].flatten(), rewards[2].flatten())[0]))
-                    logger.record_tabular('reward/in_spearman_1_2', float(
-                        spearmanr(rewards[1].flatten(), rewards[2].flatten())[0]))
-                except:
-                    pass
 
             g_loss_m = np.mean(g_loss, axis=1)
             e_loss_m = np.mean(e_loss, axis=1)

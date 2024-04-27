@@ -46,9 +46,9 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 
 @click.command()
 @click.option('--logdir', type=click.STRING, default='./results/torch_kfac')
-@click.option('--env', type=click.STRING, default='simple_spread')
+@click.option('--env', type=click.STRING, default='simple_speaker_listener')
 @click.option('--expert_path', type=click.STRING,
-              default='./results/target_model/exps/mack/simple_spread/l-0.1-b-1000/seed-1/checkpoint20000-10000tra.pkl')
+              default='./results/target_model/exps/mack/simple_speaker_listener/l-0.1-b-1000/seed-1/checkpoint22000-12000tra.pkl')
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--traj_limitation', type=click.INT, default=200)
 @click.option('--ret_threshold', type=click.FLOAT, default=-10)
@@ -56,14 +56,14 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu,
 @click.option('--bc_iters', type=click.INT, default=500)
 def main(logdir, env, expert_path, seed, traj_limitation, ret_threshold, disc_type, bc_iters):
     env_ids = [env]
-    lrs = [0.2]
+    lrs = [0.009]
     dis_lrs = [0.1]
     seeds = [1]
     batch_sizes = [1000]
     weight_decays = [0]
     bc_iters = 500
     d_iters = 1
-    num_timesteps = 5e7
+    num_timesteps = 3e7
     ent_coef = 0.00
     vf_coef = 1
     

@@ -63,10 +63,7 @@ class Discriminator(object):
 
         self.total_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels))
         fisher_loss = -self.total_loss
-
-        # self.reward_op = tf.sigmoid(g_logits) * 2.0 - 1
-        self.reward_op = tf.log(tf.sigmoid(g_logits) + 1e-10)
-
+        self.reward_op = tf.sigmoid(g_logits) * 2.0 - 1
         # self.reward_op = tf.nn.sigmoid_cross_entropy_with_logits(logits=g_logits, labels=tf.zeros_like(g_logits))
 
         self.var_list = self.get_trainable_variables()
@@ -75,17 +72,14 @@ class Discriminator(object):
 
         # self.d_optim = tf.train.AdamOptimizer(self.lr_rate, beta1=0.5, beta2=0.9).minimize(self.total_loss, var_list=self.var_list)
         with tf.variable_scope(self.scope + '/d_optim'):
-            # d_optim = kfac.KfacOptimizer(
-            #     learning_rate=self.lr_rate, clip_kl=kfac_clip,
-            #     momentum=0.9, kfac_update=1, epsilon=0.01,
-            #     stats_decay=0.99, async=0, cold_iter=10,
-            #     max_grad_norm=max_grad_norm)
-            # update_stats_op = d_optim.compute_and_apply_stats(fisher_loss, var_list=params)
-            # train_op, q_runner = d_optim.apply_gradients(list(zip(grads, params)))
-            # self.q_runner = q_runner
-            d_optim = tf.train.AdamOptimizer(learning_rate=self.lr_rate)
-            train_op = d_optim.apply_gradients(list(zip(grads, params)))
-
+            d_optim = kfac.KfacOptimizer(
+                learning_rate=self.lr_rate, clip_kl=kfac_clip,
+                momentum=0.9, kfac_update=1, epsilon=0.01,
+                stats_decay=0.99, async1=0, cold_iter=10,
+                max_grad_norm=max_grad_norm)
+            update_stats_op = d_optim.compute_and_apply_stats(fisher_loss, var_list=params)
+            train_op, q_runner = d_optim.apply_gradients(list(zip(grads, params)))
+            self.q_runner = q_runner
         self.d_optim = train_op
         self.saver = tf.train.Saver(self.get_variables())
 
@@ -135,4 +129,3 @@ class Discriminator(object):
         for p, loaded_p in zip(self.params_flat, loaded_params):
             restores.append(p.assign(loaded_p))
         self.sess.run(restores)
-

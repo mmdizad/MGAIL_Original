@@ -43,9 +43,10 @@ def train(logdir, env_id, num_timesteps, lr, timesteps_per_batch, seed, num_cpu)
 
 @click.command()
 @click.option('--logdir', type=click.STRING, default='./results/target_model')
+# @click.option('--env', type=click.STRING, default='simple_world_comm')
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_spread')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_push')
 @click.option('--lr', type=click.FLOAT, default=0.1)
 @click.option('--seed', type=click.INT, default=1)
 @click.option('--batch_size', type=click.INT, default=1000)

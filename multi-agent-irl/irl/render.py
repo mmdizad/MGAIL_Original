@@ -23,7 +23,7 @@ os.environ['DISPLAY'] = ':1'
 @click.command()
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_spread')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_speaker_listener')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
     tf.reset_default_graph()
@@ -38,7 +38,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './results/tensor_trained/gail/simple_spread/decentralized/s-200/l-0.1-b-1000-d-0.1-c-500/seed-1/m_00001'
+    path = './results/target_model/exps/mack/simple_speaker_listener/l-0.1-b-1000/seed-1/checkpoint22000'
 
     print(path)
     n_agents = len(env.action_space)
@@ -63,7 +63,7 @@ def render(env, image):
 
     images = []
     sample_trajs = []
-    num_trajs = 10000
+    num_trajs = 1000
     max_steps = 50
     avg_ret = [[] for _ in range(n_agents)]
 
@@ -94,7 +94,7 @@ def render(env, image):
             obs = [ob[None, :] for ob in obs]
             step += 1
 
-            if image:
+            if image and (i % int(num_trajs // 10) == 0):
                 img = env.render(mode='rgb_array')
                 images.append(img[0])
                 time.sleep(0.02)
@@ -128,7 +128,7 @@ def render(env, image):
     # pkl.dump(sample_trajs, open(path + '-%dtra.pkl' % num_trajs, 'wb'))
     if image:
         print(images.shape)
-        imageio.mimsave(path + '.gif', images, duration=int(len(images) / 25), loop=1)
+        imageio.mimsave(path + '.gif', images, duration=int(len(images[0]) / 20), loop=1)
 
 
 if __name__ == '__main__':
