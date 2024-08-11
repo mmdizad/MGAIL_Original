@@ -21,7 +21,8 @@ from tqdm import tqdm
 @click.command()
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_speaker_listener')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), 
+                                            default='simple_speaker_listener')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
     
@@ -36,15 +37,11 @@ def render(env, image):
 
     env = create_env()
     paths = [
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_00001',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_04000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_08000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_12000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_16000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_20000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_24000',
-             './results/torch_kfac/gail/simple_speaker_listener/decentralized/s-200/l-0.07-d-0.07-b-1000-bc-500-w-0/seed-1/m_28000',
-            ]
+                '/home/arisa/Documents/MGAIL_Original/checkpoints/airl/simple_speaker_listener/decentralized/s-200/l-0.01-d-0.01-b-1000-c-500-iter-1-l2-0.01/seed-1/m_25000',
+                '/home/arisa/Documents/MGAIL_Original/checkpoints/airl/simple_speaker_listener/decentralized/s-200/l-0.01-d-0.01-b-1000-c-500-iter-1-l2-0.01/seed-1/m_30000',
+                '/home/arisa/Documents/MGAIL_Original/checkpoints/airl/simple_speaker_listener/decentralized/s-200/l-0.01-d-0.01-b-1000-c-500-iter-1-l2-0.01/seed-1/m_35000',
+                '/home/arisa/Documents/MGAIL_Original/checkpoints/airl/simple_speaker_listener/decentralized/s-200/l-0.01-d-0.01-b-1000-c-500-iter-1-l2-0.01/seed-1/m_40000',
+    ]
     for path in paths:
         test(path, env, env_id, image)
     
@@ -62,7 +59,8 @@ def test(path, env, env_id, image):
         print(ac_space)
 
         n_actions = [action.n for action in ac_space]
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = 'cpu'
         make_model = lambda: Model(
             CategoricalPolicy, ob_space, ac_space, 1, total_timesteps=1e7, device=device, nprocs=2, nsteps=500,
             nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.01, max_grad_norm=0.5, kfac_clip=0.001,
@@ -74,7 +72,7 @@ def test(path, env, env_id, image):
 
         images = []
         sample_trajs = []
-        num_trajs = 1000
+        num_trajs = 500
         max_steps = 50
         avg_ret = [[] for _ in range(n_agents)]
 
@@ -127,8 +125,8 @@ def test(path, env, env_id, image):
             }
             
             sample_trajs.append(traj_data)
-            if i % 1000 == 0:
-                print(f'traj_num {i} expected_return {ep_ret}')
+            # if i % 1000 == 0:
+            #     print(f'traj_num {i} expected_return {ep_ret}')
                 
             for k in range(n_agents):
                 avg_ret[k].append(ep_ret[k])

@@ -79,7 +79,6 @@ class Model(object):
             logpac = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=train_model[k].pi, labels=A[k])
             self.log_pac.append(-logpac)
-
             lld.append(tf.reduce_mean(logpac))
             logits.append(train_model[k].pi)
 
@@ -95,6 +94,8 @@ class Model(object):
                 tf.pow(train_model[k].vf - tf.stop_gradient(sample_net[k]), 2)))
             joint_fisher_loss.append(pg_fisher_loss[k] + vf_fisher_loss[k])
 
+        self.pg_loss = pg_loss
+        self.vf_loss = vf_loss
         self.policy_params = []
         self.value_params = []
 
@@ -134,7 +135,7 @@ class Model(object):
                     optim.append(kfac.KfacOptimizer(
                         learning_rate=PG_LR[k], clip_kl=kfac_clip,
                         momentum=0.9, kfac_update=1, epsilon=0.01,
-                        stats_decay=0.99, async=0, cold_iter=10,
+                        stats_decay=0.99, async1=0, cold_iter=10,
                         max_grad_norm=max_grad_norm)
                     )
                     update_stats_op.append(optim[k].compute_and_apply_stats(joint_fisher_loss, var_list=params[k]))
@@ -146,7 +147,7 @@ class Model(object):
                     clones.append(kfac.KfacOptimizer(
                         learning_rate=PG_LR[k], clip_kl=kfac_clip,
                         momentum=0.9, kfac_update=1, epsilon=0.01,
-                        stats_decay=0.99, async=0, cold_iter=10,
+                        stats_decay=0.99, async1=0, cold_iter=10,
                         max_grad_norm=max_grad_norm)
                     )
                     update_stats_op.append(clones[k].compute_and_apply_stats(
@@ -193,6 +194,18 @@ class Model(object):
                     R[k]: np.concatenate([rewards[j] for j in range(k, pointer[k])], axis=0),
                     PG_LR[k]: cur_lr / float(scale[k])
                 })
+                
+                # print(np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0).shape)
+                # print(np.concatenate([ob.copy() for j in range(k, pointer[k])], axis=0).shape)
+                # print(np.concatenate([actions[j] for j in range(k, pointer[k])], axis=0).shape)
+                # print(np.concatenate([advs[j] for j in range(k, pointer[k])], axis=0).shape)
+                # print(np.concatenate([rewards[j] for j in range(k, pointer[k])], axis=0).shape)
+                
+                # logpac, pg_loss, vf_loss = sess.run([self.log_pac[0], self.pg_loss[0], self.vf_loss[0]], feed_dict=new_map)
+                # print(logpac.shape)
+                # print(pg_loss.shape)
+                # print(vf_loss.shape)
+                
                 sess.run(train_ops[k], feed_dict=new_map)
                 td_map.update(new_map)
 
@@ -634,7 +647,9 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                             pearsonr(report_rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                         logger.record_tabular('spearman %d' % k, float(
                             spearmanr(report_rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
+                        # logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('reward %d' % k, float(np.mean(mh_rewards[k])))
+                        logger.record_tabular('true reward %d' % k, float(np.mean(mh_true_rewards[k])))
                     except:
                         pass
 

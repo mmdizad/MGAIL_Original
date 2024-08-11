@@ -13,7 +13,7 @@ disc_types = ['decentralized', 'decentralized-all']
 class Discriminator(nn.Module):
     def __init__(self, ob_spaces, ac_spaces, state_only, discount,
                  nstack, index, device, disc_type='decentralized', hidden_size=128,
-                 lr_rate=0.01, total_steps=50000, kfac_clip=0.001, max_grad_norm=0.5):
+                 lr_rate=0.01, total_steps=50000, kfac_clip=0.001, max_grad_norm=0.5, l2=0.1):
         super(Discriminator, self).__init__()
         self.lr = Scheduler(v=lr_rate, nvalues=total_steps, schedule='linear')
         self.disc_type = disc_type
@@ -49,8 +49,8 @@ class Discriminator(nn.Module):
         self.value_fn = self.relu_net(self.obs, dout=1, hidden_size=hidden_size).to(device)
     
         
-        self.optimizer = KFACOptimizer(self, lr=lr_rate, kl_clip=kfac_clip)
-
+        # self.optimizer = KFACOptimizer(self, lr=lr_rate, kl_clip=kfac_clip)
+        self.optimizer = optim.Adam(self.parameters(), lr=lr_rate, weight_decay=l2)
 
     def relu_net(self, din, layers=2, dout=1, hidden_size=128):
         seq_layers = []
@@ -62,7 +62,7 @@ class Discriminator(nn.Module):
                 seq_layers.append(nn.Linear(hidden_size, hidden_size))
                 seq_layers.append(nn.ReLU())
         seq_layers.append(nn.Linear(hidden_size, dout))
-        seq = torch.nn.Sequential(*seq_layers)
+        seq = nn.Sequential(*seq_layers)
         return seq
     
     def get_reward(self, obs, acs, obs_next, path_probs, discrim_score=False):               
@@ -78,7 +78,7 @@ class Discriminator(nn.Module):
             log_q_tau = path_probs
             log_p_tau = self.reward_fn(raw_input) + self.gamma * self.value_fn(obs_next) - self.value_fn(obs)
             
-            log_pq = torch.logsumexp(torch.cat([log_p_tau, log_q_tau]), dim=0)
+            log_pq = torch.logsumexp(torch.stack([log_p_tau, log_q_tau]), dim=0)
             scores = torch.exp(log_p_tau - log_pq)
             eps=1e-20        
             score = torch.logit(scores, eps)
@@ -93,11 +93,8 @@ class Discriminator(nn.Module):
         
         log_q_tau = lprobs
         log_p_tau = self.reward_fn(raw_input) + self.gamma * self.value_fn(nobs) - self.value_fn(obs)
-        log_pq = torch.logsumexp(torch.cat([log_p_tau, log_q_tau]), dim=0)
-        print(f'labels: {labels.shape}')
-        print(f'log_q_tau: {log_q_tau.shape}')
-        print(f'log_p_tau: {log_p_tau.shape}')
-        print(f'log_pq: {log_pq.shape}')
+        log_pq = torch.logsumexp(torch.stack([log_p_tau, log_q_tau]), dim=0)
+
         loss = -torch.mean(labels * (log_p_tau - log_pq) + (1 - labels) * (log_q_tau - log_pq))
         return loss
 
@@ -115,23 +112,15 @@ class Discriminator(nn.Module):
         act = self.to_torch(np.concatenate([g_acs, e_acs], axis=0))
         nobs = self.to_torch(np.concatenate([g_nobs, e_nobs], axis=0))
         lprobs = self.to_torch(np.concatenate([g_probs, e_probs], axis=0))
-        print(f'g_obs: {g_obs.shape}')
-        print(f'e_obs: {e_obs.shape}')
-        print(f'g_acs: {g_acs.shape}')
-        print(f'e_acs: {e_acs.shape}')
-        print(f'g_nobs: {g_nobs.shape}')
-        print(f'e_nobs: {e_nobs.shape}')
-        print(f'g_probs: {g_probs.shape}')
-        print(f'e_probs: {e_probs.shape}')
         
         loss = self.calculate_loss(obs, act, nobs, lprobs, labels)
         
-        if self.optimizer.steps % self.optimizer.Ts == 0:
-            self.zero_grad()
-            fisher_loss = -loss
-            self.optimizer.acc_stats = True
-            fisher_loss.backward(retain_graph=True)
-            self.optimizer.acc_stats = False
+        # if self.optimizer.steps % self.optimizer.Ts == 0:
+        #     self.zero_grad()
+        #     fisher_loss = -loss
+        #     self.optimizer.acc_stats = True
+        #     fisher_loss.backward(retain_graph=True)
+        #     self.optimizer.acc_stats = False
         
         self.optimizer.zero_grad()
         loss.backward()
@@ -147,4 +136,4 @@ class Discriminator(nn.Module):
         self.load_state_dict(torch.load(load_path)) # TODO load optimizer parameters
         
     def to_torch(self, param):
-        return torch.tensor(param, dtype=torch.float32, requires_grad=True).to(self.device)
+        return torch.from_numpy(param).to(self.device)

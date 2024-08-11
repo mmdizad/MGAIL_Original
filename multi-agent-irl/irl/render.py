@@ -23,7 +23,8 @@ os.environ['DISPLAY'] = ':1'
 @click.command()
 @click.option('--env', type=click.Choice(['simple', 'simple_speaker_listener',
                                           'simple_crypto', 'simple_push',
-                                          'simple_tag', 'simple_spread', 'simple_adversary']), default='simple_speaker_listener')
+                                          'simple_tag', 'simple_spread', 'simple_adversary']), 
+              default='simple_push')
 @click.option('--image', is_flag=True, flag_value=True)
 def render(env, image):
     tf.reset_default_graph()
@@ -38,7 +39,7 @@ def render(env, image):
         return env
 
     env = create_env()
-    path = './results/target_model/exps/mack/simple_speaker_listener/l-0.1-b-1000/seed-1/checkpoint22000'
+    path = './results/tensor_trained/airl/simple_push/decentralized/s-200/l-0.1-b-1000-d-0.1-c-500-l2-0.1-iter-1-r-0.0/seed-1/m_25000'
 
     print(path)
     n_agents = len(env.action_space)
@@ -114,8 +115,8 @@ def render(env, image):
         }
 
         sample_trajs.append(traj_data)
-        if i % 1000 == 0:
-            print('traj_num', i, 'expected_return', ep_ret)
+        # if i % 1000 == 0:
+        #     print('traj_num', i, 'expected_return', ep_ret)
 
         for k in range(n_agents):
             avg_ret[k].append(ep_ret[k])

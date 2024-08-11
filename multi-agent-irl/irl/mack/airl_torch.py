@@ -2,24 +2,24 @@ import os.path as osp
 import random
 import time
 
-import joblib
 import numpy as np
 import torch
-import torch.nn.functional as F
 from irl.dataset import Dset
 from irl.mack.kfac_discriminator_airl_torch import Discriminator
 from rl import logger
 from rl.acktr.utils_torch import (Scheduler, cat_entropy, discount_with_dones,
-                                  mse, multionehot, onehot)
+                                  multionehot, onehot)
 from rl.common.torch_util import explained_variance, set_global_seeds
 from scipy.stats import pearsonr, spearmanr
+from irl.mack.kfac_torch import KFACOptimizer
 
 
 class GeneralModel(object):
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=2, nsteps=200,
-                 nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
+                 nstack=1, ent_coef=0.00, vf_coef=1, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
                  kfac_clip=0.001, lrschedule='linear', identical=None, weight_decay=1e-4):
         
+        self.vf_fisher_coef = vf_fisher_coef
         self.vf_coef = vf_coef
         self.ent_coef = ent_coef
         self.device = device
@@ -35,7 +35,7 @@ class GeneralModel(object):
 
         h = 0
         for k in range(num_agents):
-            if identical[k]:
+            if self.identical[k]:
                 self.scale[h] += 1
             else:
                 self.pointer[h] = k
@@ -43,70 +43,48 @@ class GeneralModel(object):
         self.pointer[h] = num_agents
         
         
-        self.step_model = []
-        self.train_model = []
-
-        # A, ADV, R, PG_LR = [], [], [], []
-        # for k in range(num_agents):
-        #     if identical[k]:
-        #         A.append(A[-1])
-        #         ADV.append(ADV[-1])
-        #         R.append(R[-1])
-        #         PG_LR.append(PG_LR[-1])
-        #     else:
-        #         A.append(tf.placeholder(tf.int32, [nbatch * scale[k]]))
-        #         ADV.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
-        #         R.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
-        #         PG_LR.append(tf.placeholder(tf.float32, []))
-
-        # pg_loss, entropy, vf_loss, train_loss = [], [], [], []
-        # self.model = step_model = []
-        # self.model2 = train_model = []
-        # self.pg_fisher = pg_fisher_loss = []
-        # self.logits = logits = []
-        # sample_net = []
-        # self.vf_fisher = vf_fisher_loss = []
-        # self.joint_fisher = joint_fisher_loss = []
-        # self.lld = lld = []
-        # self.log_pac = []
-
-        self.step_model = []
-        self.train_model = []
         
+        self.step_model = []
+
+        
+        self.step_model = []
+        self.train_model = []
         for k in range(num_agents):
-            if identical[k]:
-                self.step_model.append(self.step_model[-1])
+            if self.identical[k]:
                 self.train_model.append(self.train_model[-1])
             else:      
-                self.step_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
+                self.train_model.append(policy(ob_space[k], ac_space[k], ob_space, ac_space,
                                          nstack, self.device).to(self.device))
-                self.train_model.append(self.step_model[-1])
 
-        self.optim = optim = []
-        self.clones = clones = []
+        self.optim = []
+        self.clones = []
         # optimizers
         for k in range(num_agents):
             if self.identical[k]:
                 self.optim.append(self.optim[-1])
                 self.clones.append(self.clones[-1])
             else:
-                self.optim.append(torch.optim.Adam(self.train_model[k].parameters(), lr=lr, weight_decay=weight_decay))
-                self.clones.append(torch.optim.Adam(self.train_model[k].policy_params(), lr=lr, weight_decay=weight_decay))
+                self.optim.append(
+                    KFACOptimizer(self.train_model[k], lr=lr, kl_clip=kfac_clip, weight_decay=weight_decay)
+                )
+                self.clones.append(
+                    KFACOptimizer(self.train_model[k].pi, lr=lr, kl_clip=kfac_clip, weight_decay=weight_decay)
+                )
 
         self.lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
         self.clone_lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-        self.initial_state = [self.step_model[k].initial_state for k in range(num_agents)]
+        self.initial_state = [self.train_model[k].initial_state for k in range(num_agents)]
 
     def train(self, obs, states, rewards, masks, actions, values):
         advs = [rewards[k] - values[k] for k in range(self.num_agents)]
-        for step in range(len(obs)):
-            cur_lr = self.lr.value()
+        cur_lr = self.clone_lr.value()
     
         ob = np.concatenate(obs, axis=1)
             
         policy_loss = []
         value_loss = []
         policy_entropy = []
+        
         for k in range(self.num_agents):
             if self.identical[k]:
                 policy_loss.append(policy_loss[-1])
@@ -125,26 +103,53 @@ class GeneralModel(object):
             
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
             X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
-            ADV =  torch.tensor(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
-            R =  torch.tensor(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.float32, requires_grad=True).to(self.device)
+            
+            A = torch.from_numpy(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0)).to(self.device)
+            ADV =  torch.from_numpy(np.concatenate([advs[j] for j in range(k, self.pointer[k])], axis=0)).to(self.device)
+            R =  torch.from_numpy(np.concatenate([rewards[j] for j in range(k, self.pointer[k])], axis=0)).to(self.device)
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
-    
-            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
+            # print(f'X: {X.shape}')
+            # print(f'X_v: {X_v.shape}')
+            # print(f'A: {A.shape}')
+            # print(f'ADV: {ADV.shape}')
+            # print(f'R: {R.shape}')
+            # print(f'pi: {pi.shape}')
+            # print(f'vf: {vf.shape}')
+            logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A.long())
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
             pg_loss = pg_loss - self.ent_coef * entropy
             vf = torch.squeeze(vf)
-            vf_loss = torch.mean(torch.nn.MSELoss(reduction="none")(vf, R))
-            # print(f'vf: {vf[0:80]}')
-            # print(f'R: {R[0:80]}')
-            # print(f'ADV:\n{ADV[0:80]}')
+            vf_loss = torch.mean(torch.nn.MSELoss()(vf, R))
             loss = pg_loss + self.vf_coef * vf_loss
-            # print('#' * 50)
+            # print(f'logpac: {logpac.shape}')
+            # print(f'pg_loss: {pg_loss.shape}')
+            # print(f'vf_loss: {vf_loss.shape}')
+            # print(f'loss: {loss.shape}')
+            
+            
+            # optimizer loss
+            if self.optim[k].steps % self.optim[k].Ts == 0:
+                self.train_model[k].zero_grad()
+                pg_fisher_loss = -torch.mean(logpac)
+                
+                value_noise = torch.randn(vf.size())
+                if vf.is_cuda:
+                    value_noise = value_noise.cuda()
+
+                sample_values = vf + value_noise
+                vf_fisher_loss = -(vf - sample_values.detach()).pow(2).mean()
+
+                fisher_loss = pg_fisher_loss + vf_fisher_loss * self.vf_fisher_coef
+                self.optim[k].acc_stats = True
+                fisher_loss.backward(retain_graph=True)
+                self.optim[k].acc_stats = False
+    
             for g in self.optim[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
-    
+            self.optim[k].lr = cur_lr
+            
             self.optim[k].zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.train_model[k].parameters(), self.max_grad_norm)
@@ -162,12 +167,23 @@ class GeneralModel(object):
                 continue
 
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
+            A = torch.from_numpy(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0)).to(self.device)
             pi = self.train_model[k].compute_pi(X)
             logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             lld = torch.mean(logpac)
+            
+            if self.clones[k].steps % self.clones[k].Ts == 0:
+                self.train_model[k].zero_grad()
+                pg_fisher_loss = -lld
+
+                fisher_loss = pg_fisher_loss
+                self.clones[k].acc_stats = True
+                fisher_loss.backward(retain_graph=True)
+                self.clones[k].acc_stats = False
+            
             for g in self.clones[k].param_groups:
                 g['lr'] = cur_lr / float(self.scale[k])
+            self.optim[k].lr = cur_lr
 
             self.clones[k].zero_grad()
             lld.backward()
@@ -182,27 +198,28 @@ class GeneralModel(object):
         for k in range(self.num_agents):
             if self.identical[k]:
                 continue
+            
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
-            A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
+            A = torch.from_numpy(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0)).to(self.device)
             pi = self.train_model[k].compute_pi(X)
-            print(f'pi: {pi.shape}')
+            
             log_pac = -1 * torch.nn.CrossEntropyLoss(reduction="none")(pi, A).detach().cpu().numpy()
-            print(f'log_pac: {log_pac.shape}')
+            
             if self.scale[k] == 1:
                 action_prob.append(log_pac)
             else:
                 log_pac = np.split(log_pac, self.scale[k], axis=0)
                 action_prob.append(log_pac)
-        print(f'action_prob: {len(action_prob)}')
-        print(f'action_prob: {(action_prob[0])}')
+
         action_prob = np.array(action_prob)
-        print(f'ac: {action_prob.shape}')
+        if action_prob.shape[0] == 1:
+            action_prob = action_prob.squeeze(axis=0)
         return action_prob
 
     def get_log_action_prob_step(self, obs, actions):
         action_prob = []
         for k in range(self.num_agents):
-            action_prob.append(self.step_model[k].step_log_prob(obs[k], actions[k]))
+            action_prob.append(self.train_model[k].step_log_prob(obs[k], actions[k]))
         return action_prob
 
     def save(self, save_path):
@@ -217,7 +234,6 @@ class GeneralModel(object):
         for k in range(self.num_agents):
             key1 = f'train_model{k+1}'
             self.train_model[k].load_state_dict(models_dict[key1])
-            self.step_model[k] = self.train_model[k]
         
     def step(self, ob, av):
         a, v, s = [], [], []
@@ -225,7 +241,7 @@ class GeneralModel(object):
         for k in range(self.num_agents):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
-            a_, v_, s_ = self.step_model[k].step(ob[k], obs, a_v)
+            a_, v_, s_ = self.train_model[k].step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -237,7 +253,7 @@ class GeneralModel(object):
         for k in range(self.num_agents):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
-            a_, v_, s_ = self.step_model[k].best_step(ob[k], obs, a_v)
+            a_, v_, s_ = self.train_model[k].best_step(ob[k], obs, a_v)
             a.append(a_.detach().cpu().numpy())
             v.append(v_.detach().cpu().numpy())
             s.append(s_)
@@ -250,7 +266,7 @@ class GeneralModel(object):
             a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
                                   for i in range(self.num_agents) if i != k], axis=1)
             with torch.no_grad():
-                v_ = self.step_model[k].value(ob, a_v)
+                v_ = self.train_model[k].value(ob, a_v)
             v.append(v_.detach().cpu().numpy())
         return v
 
@@ -430,14 +446,15 @@ class Runner(object):
 
 
 def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.99, lam=0.95, log_interval=1, nprocs=32,
-          nsteps=20, nstack=1, ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
+          nsteps=20, nstack=1, ent_coef=0.01, vf_coef=1, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
           kfac_clip=0.001, save_interval=100, lrschedule='linear', dis_lr=0.001, disc_type='decentralized',
-          bc_iters=500, identical=None, d_iters=1, rew_scale=0.1, weight_decay=1e-4):
+          bc_iters=500, identical=None, d_iters=1, rew_scale=0.1, weight_decay=1e-4, l2=0.1):
     print(f"learning rate: {lr}")
-    print(f"dis lr: {dis_lr}")
+    print(f"discriminator lr: {dis_lr}")
     print(f"weight decay: {weight_decay}")
     print(f"bc iters: {bc_iters}")
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
     set_global_seeds(seed)
     buffer = None
     update_policy_until = 10
@@ -449,21 +466,20 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     make_model = lambda: GeneralModel(policy, ob_space, ac_space, nenvs, total_timesteps, device, nprocs=nprocs, nsteps=nsteps,
                                nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=vf_fisher_coef,
                                lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
-                               lrschedule=lrschedule, identical=identical)
+                               lrschedule=lrschedule, identical=identical, weight_decay=weight_decay)
     
     if save_interval and logger.get_dir():
         import cloudpickle
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
             fh.write(cloudpickle.dumps(make_model))
     model = make_model()
-    
     if disc_type == 'decentralized' or disc_type == 'decentralized-all':
-        print(f'dis lr: {dis_lr}')
         discriminator = [
             Discriminator(ob_space, ac_space,
-                          state_only=True, discount=gamma, nstack=nstack, index=k, device=device, disc_type=disc_type,
+                          state_only=True, discount=gamma, nstack=nstack, index=k, device=device,
+                          disc_type=disc_type,
                           total_steps=total_timesteps // (nprocs * nsteps),
-                          lr_rate=dis_lr, weight_decay=weight_decay) for k in range(num_agents)
+                          lr_rate=dis_lr, l2=l2).double() for k in range(num_agents)
         ]
     else:
         assert False
@@ -525,8 +541,7 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
 
             e_a = [np.argmax(e_actions[k], axis=1) for k in range(len(e_actions))]
             g_a = [np.argmax(g_actions[k], axis=1) for k in range(len(g_actions))]
-            print(f'g_obs: {np.array(g_obs).shape}')
-            print(f'g_a: {np.array(g_a).shape}')
+
             g_log_prob = model.get_log_action_prob(g_obs, g_a)
             e_log_prob = model.get_log_action_prob(e_obs, e_a)
             if disc_type == 'decentralized':
@@ -599,7 +614,8 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
                             pearsonr(report_rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
                         logger.record_tabular('spearman %d' % k, float(
                             spearmanr(report_rewards[k].flatten(), mh_true_returns[k].flatten())[0]))
-                        logger.record_tabular('reward %d' % k, float(np.mean(rewards[k])))
+                        logger.record_tabular('reward %d' % k, float(np.mean(mh_rewards[k])))
+                        logger.record_tabular('true reward %d' % k, float(np.mean(mh_true_rewards[k])))
                     except:
                         pass
 

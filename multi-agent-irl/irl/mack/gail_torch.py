@@ -34,6 +34,7 @@ class GeneralModel():
             
         self.scale = [1 for _ in range(num_agents)]
         self.pointer = [i for i in range(num_agents)]
+        
         h = 0
         for k in range(num_agents):
             if self.identical[k]:
@@ -80,6 +81,7 @@ class GeneralModel():
         policy_loss = []
         value_loss = []
         policy_entropy = []
+        
         for k in range(self.num_agents):
             if self.identical[k]:
                 policy_loss.append(policy_loss[-1])
@@ -87,6 +89,7 @@ class GeneralModel():
                 policy_entropy.append(policy_entropy[-1])
                 continue
             A_v = None
+            
             if self.num_agents > 1:
                 action_v = []
                 for _ in range(k, self.pointer[k]):
@@ -94,6 +97,7 @@ class GeneralModel():
                                                    for i in range(self.num_agents) if i != k], axis=1))
                 action_v = np.concatenate(action_v, axis=0)
                 A_v = action_v
+                
             X = np.concatenate([obs[j] for j in range(k, self.pointer[k])], axis=0)
             X_v = np.concatenate([ob.copy() for _ in range(k, self.pointer[k])], axis=0)
             A = torch.tensor(np.concatenate([actions[j] for j in range(k, self.pointer[k])], axis=0), dtype=torch.int64).to(self.device)
@@ -102,7 +106,6 @@ class GeneralModel():
             # calculations
             pi, vf = self.train_model[k](X, X_v, A_v)
        
-
             logpac = torch.nn.CrossEntropyLoss(reduction="none")(pi, A)
             entropy = torch.mean(cat_entropy(pi))
             pg_loss = torch.mean(ADV * logpac)
@@ -372,14 +375,17 @@ def learn(policy, expert, env, env_id, seed, total_timesteps=int(40e6), gamma=0.
     if disc_type == 'decentralized':
         discriminator = [
             Discriminator(ob_space, ac_space, nstack, k, device,
+                          total_steps=total_timesteps // (nprocs * nsteps),
                           disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device) 
             for k in range(num_agents)
         ]
     elif disc_type == 'centralized':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
+                                      total_steps=total_timesteps // (nprocs * nsteps),
                                       disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device)
     elif disc_type == 'single':
         discriminator = Discriminator(ob_space, ac_space, nstack, 0, device,
+                                      total_steps=total_timesteps // (nprocs * nsteps),
                                       disc_type=disc_type, max_grad_norm=max_grad_norm, learning_rate=dis_lr).to(device)
     else:
         assert False

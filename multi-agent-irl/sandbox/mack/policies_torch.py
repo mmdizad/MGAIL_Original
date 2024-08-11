@@ -43,24 +43,25 @@ class CategoricalPolicy(nn.Module):
         return pi, vf
 
     def compute_pi(self, ob):
-        ob = torch.tensor(ob, dtype=torch.float32, requires_grad=True).to(self.device)
+        ob = torch.from_numpy(ob).to(self.device).float()
         pi = self.pi(ob)
         return pi
     
     def compute_vf(self, obs, a_v):
-        obs = torch.tensor(obs, dtype=torch.float32, requires_grad=True).to(self.device)
+        obs = torch.from_numpy(obs).to(self.device)
         if a_v is not None:
-            a_v = torch.tensor(a_v, dtype=torch.float32, requires_grad=True).to(self.device)
+            a_v = torch.from_numpy(a_v).to(self.device)
             Y = torch.cat([obs, a_v], dim=1)
         else:
             Y = obs
+        Y = Y.float()
         vf = self.vf(Y)
         return vf
 
 
     def step_log_prob(self, ob, acts):
         pi = self.compute_pi(ob)
-        acts = torch.tensor(acts, dtype=torch.int64).to(self.device)
+        acts = torch.from_numpy(acts).to(self.device)
         loss = -1 * nn.CrossEntropyLoss()(pi, acts)
         return loss.reshape((-1, 1))
 

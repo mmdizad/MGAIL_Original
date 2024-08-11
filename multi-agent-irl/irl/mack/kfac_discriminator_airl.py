@@ -78,6 +78,10 @@ class Discriminator(object):
             log_pq = tf.reduce_logsumexp([log_p_tau, log_q_tau], axis=0)
             self.discrim_output = tf.exp(log_p_tau - log_pq)
 
+        self.log_q_tau = log_q_tau
+        self.log_p_tau = log_p_tau
+        self.log_pq = log_pq
+        
         self.total_loss = -tf.reduce_mean(self.labels * (log_p_tau - log_pq) + (1 - self.labels) * (log_q_tau - log_pq))
         self.var_list = self.get_trainable_variables()
         params = find_trainable_variables(self.scope)
@@ -150,6 +154,7 @@ class Discriminator(object):
                      self.labels: labels,
                      self.lr_rate: self.lr.value()}
         loss, _ = self.sess.run([self.total_loss, self.d_optim], feed_dict)
+        # log_p_tau, log_q_tau, log_pq= self.sess.run([self.log_p_tau, self.log_q_tau, self.log_pq], feed_dict)
         return loss
 
     def restore(self, path):
