@@ -3,12 +3,14 @@ import time
 
 import joblib
 import numpy as np
+import torch
 import tensorflow as tf
 from rl.acktr.utils import Scheduler, find_trainable_variables, discount_with_dones
-from rl.acktr.utils import cat_entropy, mse, onehot, multionehot
+from rl.acktr.utils import cat_entropy, mse
 from rl import logger
 from rl.acktr import kfac
 from rl.common import set_global_seeds, explained_variance
+from tqdm import tqdm
 
 
 class Model(object):
@@ -22,8 +24,9 @@ class Model(object):
         config.gpu_options.allow_growth = True
         self.sess = sess = tf.Session(config=config)
         nbatch = nenvs * nsteps
+        ob_space = list(ob_space)
+        ac_space = list(ac_space)
         self.num_agents = num_agents = len(ob_space)
-        self.n_actions = [ac_space[k].n for k in range(self.num_agents)]
         if identical is None:
             identical = [False for _ in range(self.num_agents)]
 
@@ -38,7 +41,13 @@ class Model(object):
                 h = k
         pointer[h] = num_agents
 
-        print(pointer)
+        # print("^"*50)
+        # print(nbatch)
+        # print(scale)
+        # print(ob_space)
+        # print(ac_space)
+        # print("^"*50)
+        
 
         A, ADV, R, PG_LR = [], [], [], []
         for k in range(num_agents):
@@ -48,7 +57,7 @@ class Model(object):
                 R.append(R[-1])
                 PG_LR.append(PG_LR[-1])
             else:
-                A.append(tf.placeholder(tf.int32, [nbatch * scale[k]]))
+                A.append(tf.placeholder(tf.float32, [nbatch * scale[k], ac_space[k].shape[0]]))
                 ADV.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
                 R.append(tf.placeholder(tf.float32, [nbatch * scale[k]]))
                 PG_LR.append(tf.placeholder(tf.float32, []))
@@ -73,27 +82,38 @@ class Model(object):
                 step_model.append(step_model[-1])
                 train_model.append(train_model[-1])
             else:
+                # print(ac_space)
+                # import sys
+                # sys.exit()
                 step_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
                                          nenvs, 1, nstack, reuse=False, name='%d' % k))
                 train_model.append(policy(sess, ob_space[k], ac_space[k], ob_space, ac_space,
                                           nenvs * scale[k], nsteps, nstack, reuse=True, name='%d' % k))
 
-            logpac = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=train_model[k].pi, labels=A[k])
+            stats = train_model[k].mean_std
+            ac = ac_space[k].shape[0]
+            # logpac_1 = - tf.reduce_sum(tf.log(stats[:,ac:]), axis=1) - 0.5 * tf.log(2.0*np.pi)*ac - 0.5 * tf.reduce_sum(tf.square(stats[:,:ac] - A[k]) / (tf.square(stats[:,ac:])), axis=1)
+
+            # logpac = tf.reduce_sum(mse(A[k], stats[:, :ac]), axis=-1)
+
+            logpac = 0.5 * tf.reduce_sum(tf.square((A[k] - stats[:, :ac]) / stats[:, ac:]), axis=-1) \
+                     + 0.5 * np.log(2.0 * np.pi) * tf.to_float(tf.shape(A[k])[-1]) \
+                     + tf.reduce_sum(tf.log(stats[:, ac:]), axis=-1)
+            # # logpac = logpac + logpac_1
             lld.append(tf.reduce_mean(logpac))
-            logits.append(train_model[k].pi)
 
             ##training loss
             pg_loss.append(tf.reduce_mean(ADV[k] * logpac))
-            entropy.append(tf.reduce_mean(cat_entropy(train_model[k].pi)))
+            entropy.append(tf.reduce_sum(
+                train_model[k].logstd + .5 * np.log(2.0 * np.pi * np.e), axis=-1))
             pg_loss[k] = pg_loss[k] - ent_coef * entropy[k]
             vf_loss.append(tf.reduce_mean(mse(tf.squeeze(train_model[k].vf), R[k])))
             train_loss.append(pg_loss[k] + vf_coef * vf_loss[k])
 
             ##Fisher loss construction
-            pg_fisher_loss.append(-tf.reduce_mean(logpac))
+            pg_fisher_loss.append(tf.reduce_mean(logpac))
             sample_net.append(train_model[k].vf + tf.random_normal(tf.shape(train_model[k].vf)))
-            vf_fisher_loss.append(-vf_fisher_coef * tf.reduce_mean(
+            vf_fisher_loss.append(tf.reduce_mean(
                 tf.pow(train_model[k].vf - tf.stop_gradient(sample_net[k]), 2)))
             joint_fisher_loss.append(pg_fisher_loss[k] + vf_fisher_loss[k])
 
@@ -121,9 +141,10 @@ class Model(object):
         ]
 
         self.optim = optim = []
+        self.vf_optim = vf_optim = []
         self.clones = clones = []
         update_stats_op = []
-        train_op, clone_op, q_runner = [], [], []
+        train_op, vf_op, clone_op, q_runner = [], [], [], []
 
         if use_kfac:
             for k in range(num_agents):
@@ -138,19 +159,34 @@ class Model(object):
                         optim.append(kfac.KfacOptimizer(
                             learning_rate=PG_LR[k], clip_kl=kfac_clip,
                             momentum=0.9, kfac_update=1, epsilon=0.01,
-                            stats_decay=0.99, async1=0, cold_iter=10,
+                            stats_decay=0.99, async1=1, cold_iter=10,
                             max_grad_norm=max_grad_norm)
                         )
-                        update_stats_op.append(optim[k].compute_and_apply_stats(joint_fisher_loss[k], var_list=params[k]))
-                        train_op_, q_runner_ = optim[k].apply_gradients(list(zip(grads[k], params[k])))
+                        # update_stats_op.append(optim[k].compute_and_apply_stats(pg_fisher_loss[k], var_list=params[k]))
+                        # train_op_, q_runner_ = optim[k].apply_gradients(list(zip(grads[k], params[k])))
+                        train_op_, q_runner_ = optim[k].minimize(pg_loss[k], pg_fisher_loss[k], self.policy_params[k])
                         train_op.append(train_op_)
                         q_runner.append(q_runner_)
+
+                    with tf.variable_scope('vf_optim_%d' % k):
+                        vf_optim.append(kfac.KfacOptimizer(
+                            learning_rate=0.001, clip_kl=kfac_clip,
+                            momentum=0.9, kfac_update=2, epsilon=0.1,
+                            stats_decay=0.95, async1=1, cold_iter=50,
+                            max_grad_norm=None)
+                        )
+                        # update_stats_op.append(vf_optim[k].compute_and_apply_stats(joint_fisher_loss[k], var_list=params[k]))
+                        # train_op_, q_runner_ = vf_optim[k].apply_gradients(list(zip(grads[k], params[k])))
+                        vf_train_op_, q_runner_ = vf_optim[k].minimize(vf_loss[k], vf_fisher_loss[k], self.value_params[k])
+                        vf_op.append(vf_train_op_)
+                        q_runner.append(q_runner_)
+                        # vf_op.append(tf.train.AdamOptimizer(learning_rate=0.0003).minimize(vf_loss[k]))
 
                     with tf.variable_scope('clone_%d' % k):
                         clones.append(kfac.KfacOptimizer(
                             learning_rate=PG_LR[k], clip_kl=kfac_clip,
                             momentum=0.9, kfac_update=1, epsilon=0.01,
-                            stats_decay=0.99, async1=1, cold_iter=10,
+                            stats_decay=0.99, async1=0, cold_iter=10,
                             max_grad_norm=max_grad_norm)
                         )
                         update_stats_op.append(clones[k].compute_and_apply_stats(
@@ -170,6 +206,8 @@ class Model(object):
 
         def train(obs, states, rewards, masks, actions, values):
             advs = [rewards[k] - values[k] for k in range(num_agents)]
+            # print(np.mean(advs[0]))
+            advs = [(a - np.mean(a)) / (np.std(a) + 1e-8) for a in advs]
             for step in range(len(obs)):
                 cur_lr = self.lr.value()
 
@@ -183,11 +221,9 @@ class Model(object):
                 if num_agents > 1:
                     action_v = []
                     for j in range(k, pointer[k]):
-                        action_v.append(np.concatenate([multionehot(actions[i], self.n_actions[i])
-                                                   for i in range(num_agents) if i != k], axis=1))
+                        action_v.append(np.concatenate([actions[i] for i in range(num_agents) if i != k], axis=1))
                     action_v = np.concatenate(action_v, axis=0)
                     new_map.update({train_model[k].A_v: action_v})
-                    td_map.update({train_model[k].A_v: action_v})
 
                 new_map.update({
                     train_model[k].X: np.concatenate([obs[j] for j in range(k, pointer[k])], axis=0),
@@ -197,6 +233,9 @@ class Model(object):
                     R[k]: np.concatenate([rewards[j] for j in range(k, pointer[k])], axis=0),
                     PG_LR[k]: cur_lr / float(scale[k])
                 })
+                for _ in range(25):
+                    sess.run(vf_op[k], feed_dict=new_map)
+                    # print(sess.run(vf_loss[k], feed_dict=new_map))
                 sess.run(train_ops[k], feed_dict=new_map)
                 td_map.update(new_map)
 
@@ -235,41 +274,22 @@ class Model(object):
                 restores.append(p.assign(loaded_p))
             sess.run(restores)
 
-        def load2(load_path1, load_path2):
-            loaded_params1 = joblib.load(load_path1)
-            loaded_params2 = joblib.load(load_path2)
-            restores = []
-            cnt = 0
-            for p, loaded_p in zip(params_flat, loaded_params1):
-                if '_0' in p.name:
-                    restores.append(p.assign(loaded_params1[cnt]))
-                    cnt += 1
-                else:
-                    restores.append(p.assign(loaded_params2[cnt]))
-                    cnt += 1
-            assert cnt == len(loaded_params2)
-            sess.run(restores)
-
         self.train = train
         self.clone = clone
         self.save = save
         self.load = load
-        self.load2 = load2
         self.train_model = train_model
         self.step_model = step_model
 
         def step(ob, av, *_args, **_kwargs):
             a, v, s = [], [], []
             obs = np.concatenate(ob, axis=1)
+            # print(obs.shape)
             for k in range(num_agents):
                 if num_agents > 1:
-                    a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
-                                          for i in range(num_agents) if i != k], axis=1)
+                    a_v = np.concatenate([av[i] for i in range(num_agents) if i != k], axis=1)
                 else:
                     a_v = None
-                # print(ob[k].shape)
-                # print(obs.shape)
-                # print(a_v.shape)
                 a_, v_, s_ = step_model[k].step(ob[k], obs, a_v)
                 a.append(a_)
                 v.append(v_)
@@ -283,8 +303,7 @@ class Model(object):
             ob = np.concatenate(obs, axis=1)
             for k in range(num_agents):
                 if num_agents > 1:
-                    a_v = np.concatenate([multionehot(av[i], self.n_actions[i])
-                                          for i in range(num_agents) if i != k], axis=1)
+                    a_v = np.concatenate([av[i] for i in range(num_agents) if i != k], axis=1)
                 else:
                     a_v = None
                 v_ = step_model[k].value(ob, a_v)
@@ -300,36 +319,34 @@ class Runner(object):
     def __init__(self, env, model, nsteps, nstack, gamma, lam):
         self.env = env
         self.model = model
-        self.num_agents = len(env.observation_space)
+        ob_space = list(env.observation_space)
+        ac_space = list(env.action_space)
+        print(f'nstack: {nstack}')
+        print(f'ob_space: {ob_space}')
+        print(f'ac_space: {ac_space}')
+        self.num_agents = len(ob_space)
         self.nenv = nenv = env.num_envs
         self.batch_ob_shape = [
-            (nenv * nsteps, nstack * env.observation_space[k].shape[0]) for k in range(self.num_agents)]
-        self.obs = [
-            np.zeros((nenv, nstack * env.observation_space[k].shape[0])) for k in range(self.num_agents)
-        ]
+            (nenv * nsteps, nstack * ob_space[k].shape[0]) for k in range(self.num_agents)]
         self.actions = [
-            np.zeros((nenv, )) for k in range(self.num_agents)
+            np.zeros((nenv, nstack * ac_space[k].shape[0])) for k in range(self.num_agents)
         ]
+        # print(self.actions[0].shape)
         obs = env.reset()
+        for i in range(len(obs)):
+            obs[i] = obs[i].squeeze()
+        # obs = [obs]
         self.update_obs(obs)
         self.gamma = gamma
         self.lam = lam
         self.nsteps = nsteps
         self.states = model.initial_state
-        self.n_actions = [env.action_space[k].n for k in range(self.num_agents)]
         self.dones = [np.array([False for _ in range(nenv)]) for k in range(self.num_agents)]
 
     def update_obs(self, obs):
         self.obs = obs
-        # for k in range(self.num_agents):
-        #     ob = np.roll(self.obs[k], shift=-1, axis=1)
-        #     ob[:, -1] = obs[:, 0]
-        #     self.obs[k] = ob
 
-        # self.obs = [np.roll(ob, shift=-1, axis=3) for ob in self.obs]
-        # self.obs[:, :, :, -1] = obs[:, :, :, 0]
-
-    def run(self):
+    def run(self, gae=False):
         mb_obs = [[] for _ in range(self.num_agents)]
         mb_rewards = [[] for _ in range(self.num_agents)]
         mb_actions = [[] for _ in range(self.num_agents)]
@@ -337,8 +354,11 @@ class Runner(object):
         mb_dones = [[] for _ in range(self.num_agents)]
         mb_masks = [[] for _ in range(self.num_agents)]
         mb_states = self.states
-        for n in range(self.nsteps):
+        for n in tqdm(range(self.nsteps)):
+            # print(len(self.obs))
+            # print(len(self.obs[0]))
             actions, values, states = self.model.step(self.obs, self.actions)
+
             self.actions = actions
             for k in range(self.num_agents):
                 mb_obs[k].append(np.copy(self.obs[k]))
@@ -347,28 +367,36 @@ class Runner(object):
                 mb_dones[k].append(self.dones[k])
             actions_list = []
             for i in range(self.nenv):
-                actions_list.append([onehot(actions[k][i], self.n_actions[k]) for k in range(self.num_agents)])
+                actions_list.append([actions[k][i] for k in range(self.num_agents)])
+                
+            actions_list = np.array(actions_list)
+            actions_list = np.expand_dims(actions_list, axis=2)
+            
             obs, rewards, dones, _ = self.env.step(actions_list)
-            print(len(obs))
-            print(len(obs[0]))
-            print(len(rewards))
-            print(len(rewards[0]))
-            print(len(dones))
-            print(len(dones[0]))
-            print(dones)
-            print()
-            print(rewards)
-            print()
-            print(obs[0])
-            import sys
-            sys.exit()
+            
+            
+            dones = [t.repeat(len(rewards[0])) for t in dones]
+            obs = [torch.stack(t) for t in obs]
+            rewards = [torch.stack(t) for t in rewards]
+            # dones = [torch.stack(t) for t in dones]
+            
+            obs = torch.stack(obs).squeeze().transpose(0, 1).numpy()
+            rewards = torch.stack(rewards).squeeze().transpose(0, 1).numpy()
+            dones = torch.stack(dones).transpose(0, 1).numpy()
+            obs = [t for t in obs]
+            self.update_obs(obs)
+            # print(dones.shape)
+            # print(rewards.shape)
+            # print(obs.shape)
+            # obs, rewards, dones = [obs], [rewards], [dones]
+            # import ipdb; ipdb.set_trace()
             self.states = states
             self.dones = dones
-            for k in range(self.num_agents):
-                for ni, done in enumerate(dones[k]):
-                    if done:
-                        self.obs[k][ni] = self.obs[k][ni] * 0.0
-            self.update_obs(obs)
+            # for k in range(self.num_agents):
+            #     # import ipdb; ipdb.set_trace()
+            #     for ni, done in enumerate(dones[k]):
+            #         if done:
+            #             self.obs[k][ni] = self.obs[k][ni] * 0.0
             for k in range(self.num_agents):
                 mb_rewards[k].append(rewards[k])
             # mb_rewards.append(rewards)
@@ -385,59 +413,64 @@ class Runner(object):
             mb_masks[k] = mb_dones[k][:, :-1]
             mb_dones[k] = mb_dones[k][:, 1:]
 
-        # last_values = self.model.value(self.obs, self.actions) # self.states, self.dones)
-        #
-        # mb_advs = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
-        # mb_returns = [[] for _ in range(self.num_agents)]
-        #
-        # lastgaelam = 0.0
-        # for k in range(self.num_agents):
-        #     for t in reversed(range(self.nsteps)):
-        #         if t == self.nsteps - 1:
-        #             nextnonterminal = 1.0 - self.dones[k]
-        #             nextvalues = last_values[k]
-        #         else:
-        #             nextnonterminal = 1.0 - mb_dones[k][:, t + 1]
-        #             nextvalues = mb_values[k][:, t + 1]
-        #         delta = mb_rewards[k][:, t] + self.gamma * nextvalues * nextnonterminal - mb_values[k][:, t]
-        #         mb_advs[k][:, t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
-        #     mb_returns[k] = mb_advs[k] + mb_values[k]
-        #     mb_returns[k] = mb_returns[k].flatten()
-        #     mb_masks[k] = mb_masks[k].flatten()
-        #     mb_values[k] = mb_values[k].flatten()
-        #     mb_actions[k] = mb_actions[k].flatten()
+        if gae:
+            last_values = self.model.value(self.obs, self.actions) # self.states, self.dones)
 
-        mb_returns = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
-        last_values = self.model.value(self.obs, self.actions)
-        # discount/bootstrap off value fn
-        for k in range(self.num_agents):
-            for n, (rewards, dones, value) in enumerate(zip(mb_rewards[k], mb_dones[k], last_values[k].tolist())):
-                rewards = rewards.tolist()
-                dones = dones.tolist()
-                if dones[-1] == 0:
-                    rewards = discount_with_dones(rewards + [value], dones + [0], self.gamma)[:-1]
-                else:
-                    rewards = discount_with_dones(rewards, dones, self.gamma)
-                mb_returns[k][n] = rewards
+            mb_advs = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
+            mb_returns = [[] for _ in range(self.num_agents)]
 
-        for k in range(self.num_agents):
-            mb_returns[k] = mb_returns[k].flatten()
-            mb_masks[k] = mb_masks[k].flatten()
-            mb_values[k] = mb_values[k].flatten()
-            mb_actions[k] = mb_actions[k].flatten()
+            lastgaelam = 0.0
+            for k in range(self.num_agents):
+                for t in reversed(range(self.nsteps)):
+                    if t == self.nsteps - 1:
+                        nextnonterminal = 1.0 - self.dones[k]
+                        nextvalues = last_values[k]
+                    else:
+                        nextnonterminal = 1.0 - mb_dones[k][:, t + 1]
+                        nextvalues = mb_values[k][:, t + 1]
+                    delta = mb_rewards[k][:, t] + self.gamma * nextvalues * nextnonterminal - mb_values[k][:, t]
+                    mb_advs[k][:, t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
+                mb_returns[k] = mb_advs[k] + mb_values[k]
+                mb_returns[k] = mb_returns[k].flatten()
+                mb_masks[k] = mb_masks[k].flatten()
+                mb_values[k] = mb_values[k].flatten()
+                mb_actions[k] = np.reshape(mb_actions[k], [-1, mb_actions[k].shape[-1]])
+        else:
+            mb_returns = [np.zeros_like(mb_rewards[k]) for k in range(self.num_agents)]
+            last_values = self.model.value(self.obs, self.actions)
+            # discount/bootstrap off value fn
+            for k in range(self.num_agents):
+                for n, (rewards, dones, value) in enumerate(zip(mb_rewards[k], mb_dones[k], last_values[k].tolist())):
+                    rewards = rewards.tolist()
+                    dones = dones.tolist()
+                    if dones[-1] == 0:
+                        rewards = discount_with_dones(rewards + [value], dones + [0], self.gamma)[:-1]
+                    else:
+                        rewards = discount_with_dones(rewards, dones, self.gamma)
+                    mb_returns[k][n] = rewards
+
+            for k in range(self.num_agents):
+                mb_returns[k] = mb_returns[k].flatten()
+                mb_masks[k] = mb_masks[k].flatten()
+                mb_values[k] = mb_values[k].flatten()
+                mb_actions[k] = np.reshape(mb_actions[k], [-1, mb_actions[k].shape[-1]])
 
         return mb_obs, mb_states, mb_returns, mb_masks, mb_actions, mb_values
 
 
-def learn(policy, env, seed, total_timesteps=int(40e6), gamma=0.95, lam=0.92, log_interval=1, nprocs=32, nsteps=20,
+def learn(policy, env, seed, total_timesteps=int(40e6), gamma=0.999, lam=0.95, log_interval=1, nprocs=32, nsteps=20,
           nstack=1, ent_coef=0.00, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
-          kfac_clip=0.001, save_interval=100, lrschedule='linear', identical=None):
+          kfac_clip=0.001, save_interval=100, lrschedule='linear', identical=None, gae=False):
     tf.reset_default_graph()
     set_global_seeds(seed)
 
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
+    # print("$"*40)
+    # print(nenvs)
+    # print(ob_space)
+    # print(ac_space)
     make_model = lambda: Model(policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=nprocs, nsteps
                                 =nsteps, nstack=nstack, ent_coef=ent_coef, vf_coef=vf_coef, vf_fisher_coef=
                                 vf_fisher_coef, lr=lr, max_grad_norm=max_grad_norm, kfac_clip=kfac_clip,
@@ -452,9 +485,9 @@ def learn(policy, env, seed, total_timesteps=int(40e6), gamma=0.95, lam=0.92, lo
     nbatch = nenvs*nsteps
     tstart = time.time()
     coord = tf.train.Coordinator()
-    # enqueue_threads = [q_runner.create_threads(model.sess, coord=coord, start=True) for q_runner in model.q_runner]
+    enqueue_threads = [q_runner.create_threads(model.sess, coord=coord, start=True) for q_runner in model.q_runner]
     for update in range(1, total_timesteps//nbatch+1):
-        obs, states, rewards, masks, actions, values = runner.run()
+        obs, states, rewards, masks, actions, values = runner.run(gae=gae)
         policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
         model.old_obs = obs
         nseconds = time.time() - tstart
@@ -464,7 +497,7 @@ def learn(policy, env, seed, total_timesteps=int(40e6), gamma=0.95, lam=0.92, lo
             logger.record_tabular("nupdates", update)
             logger.record_tabular("total_timesteps", update*nbatch)
             logger.record_tabular("fps", fps)
-
+            logger.record_tabular('std', np.mean(model.sess.run(model.train_model[0].std)))
             for k in range(model.num_agents):
                 # logger.record_tabular('reward %d' % k, np.mean(rewards[k]))
                 logger.record_tabular("explained_variance %d" % k, float(ev[k]))
@@ -478,5 +511,6 @@ def learn(policy, env, seed, total_timesteps=int(40e6), gamma=0.95, lam=0.92, lo
             print('Saving to', savepath)
             model.save(savepath)
     coord.request_stop()
-    # coord.join(enqueue_threads)
+    coord.join(enqueue_threads)
     env.close()
+
