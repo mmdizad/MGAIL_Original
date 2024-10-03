@@ -70,12 +70,6 @@ class GaussianPolicy(object):
         ob_shape = (nbatch, ob_space.shape[0] * nstack)
         all_ob_shape = (nbatch, sum([obs.shape[0] for obs in ob_spaces]) * nstack)
         nact = ac_space.shape[0]
-        # print(f"nact: {nact}")
-        # print(f"nstack: {nstack}")
-        # print(f"ac_space: {ac_space}")
-        # print((sum([ac.shape[0] for ac in ac_spaces]) - nact))
-        # import sys
-        # sys.exit()
         all_ac_shape = (nbatch, (sum([ac.shape[0] for ac in ac_spaces]) - nact) * nstack)
         X = tf.placeholder(tf.float32, ob_shape)  # obs
         X_v = tf.placeholder(tf.float32, all_ob_shape)

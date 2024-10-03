@@ -267,9 +267,6 @@ class Model(object):
                                           for i in range(num_agents) if i != k], axis=1)
                 else:
                     a_v = None
-                # print(ob[k].shape)
-                # print(obs.shape)
-                # print(a_v.shape)
                 a_, v_, s_ = step_model[k].step(ob[k], obs, a_v)
                 a.append(a_)
                 v.append(v_)
@@ -349,19 +346,6 @@ class Runner(object):
             for i in range(self.nenv):
                 actions_list.append([onehot(actions[k][i], self.n_actions[k]) for k in range(self.num_agents)])
             obs, rewards, dones, _ = self.env.step(actions_list)
-            print(len(obs))
-            print(len(obs[0]))
-            print(len(rewards))
-            print(len(rewards[0]))
-            print(len(dones))
-            print(len(dones[0]))
-            print(dones)
-            print()
-            print(rewards)
-            print()
-            print(obs[0])
-            import sys
-            sys.exit()
             self.states = states
             self.dones = dones
             for k in range(self.num_agents):

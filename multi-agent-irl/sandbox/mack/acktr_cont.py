@@ -24,16 +24,11 @@ class Model(object):
         nbatch = nenvs * nsteps
         ob_space = [ob_space]
         ac_space = [ac_space]
-        print("$"*30)
-        print(ob_space)
-        print(ac_space)
-        print("$"*30)
         self.num_agents = num_agents = len(ob_space)
         if identical is None:
             identical = [False for _ in range(self.num_agents)]
 
         scale = [1 for _ in range(num_agents)]
-        print(f'scale: {scale}')
         pointer = [i for i in range(num_agents)]
         h = 0
         for k in range(num_agents):
@@ -153,7 +148,7 @@ class Model(object):
                         optim.append(kfac.KfacOptimizer(
                             learning_rate=PG_LR[k], clip_kl=kfac_clip,
                             momentum=0.9, kfac_update=1, epsilon=0.01,
-                            stats_decay=0.99, async1=1, cold_iter=10,
+                            stats_decay=0.99, async=1, cold_iter=10,
                             max_grad_norm=max_grad_norm)
                         )
                         # update_stats_op.append(optim[k].compute_and_apply_stats(pg_fisher_loss[k], var_list=params[k]))
@@ -166,7 +161,7 @@ class Model(object):
                         vf_optim.append(kfac.KfacOptimizer(
                             learning_rate=0.001, clip_kl=kfac_clip,
                             momentum=0.9, kfac_update=2, epsilon=0.1,
-                            stats_decay=0.95, async1=1, cold_iter=50,
+                            stats_decay=0.95, async=1, cold_iter=50,
                             max_grad_norm=None)
                         )
                         # update_stats_op.append(vf_optim[k].compute_and_apply_stats(joint_fisher_loss[k], var_list=params[k]))
@@ -180,7 +175,7 @@ class Model(object):
                         clones.append(kfac.KfacOptimizer(
                             learning_rate=PG_LR[k], clip_kl=kfac_clip,
                             momentum=0.9, kfac_update=1, epsilon=0.01,
-                            stats_decay=0.99, async1=0, cold_iter=10,
+                            stats_decay=0.99, async=0, cold_iter=10,
                             max_grad_norm=max_grad_norm)
                         )
                         update_stats_op.append(clones[k].compute_and_apply_stats(
@@ -283,9 +278,6 @@ class Model(object):
                     a_v = np.concatenate([av[i] for i in range(num_agents) if i != k], axis=1)
                 else:
                     a_v = None
-                print(ob[k].shape)
-                print(obs.shape)
-                print(a_v.shape)
                 a_, v_, s_ = step_model[k].step(ob[k], obs, a_v)
                 a.append(a_)
                 v.append(v_)
